@@ -1,0 +1,352 @@
+
+===== FILE: Box Esp =====
+--boxesp 
+
+local ref = gui.Reference("Visuals", "World")
+local gb  = gui.Groupbox(ref, "L4D2 Full Model Glow", 330, 550, 300, 0)
+
+local enable     = gui.Checkbox(gb, "l4d2.fullglow.enable", "Enable ESP", false)
+local teamcheck  = gui.Checkbox(gb, "l4d2.fullglow.team", "Team Check", true)
+
+local style = gui.Combobox(gb, "l4d2.fullglow.style", "Box Style",
+    "Original",
+    "Corner",
+    "Filled"
+)
+
+local thickness  = gui.Slider(gb, "l4d2.fullglow.thickness", "Thickness", 3, 1, 15)
+local alpha      = gui.Slider(gb, "l4d2.fullglow.alpha", "Alpha", 180, 0, 255)
+
+local colorpick  = gui.ColorPicker(gb, "l4d2.fullglow.color", "Glow Colour", 255, 0, 0, 255)
+
+gui.Text(gb, "Quick Palette")
+
+local function SetColor(r,g,b)
+    colorpick:SetValue(r,g,b,alpha:GetValue())
+end
+
+gui.Button(gb, "Red", function() SetColor(255,40,40) end)
+gui.Button(gb, "Blue", function() SetColor(50,150,255) end)
+gui.Button(gb, "Green", function() SetColor(0,255,120) end)
+gui.Button(gb, "Purple", function() SetColor(180,0,255) end)
+gui.Button(gb, "White", function() SetColor(255,255,255) end)
+
+
+local function SafeDormant(ent)
+    local ok, val = pcall(function()
+        return ent:IsDormant()
+    end)
+    if not ok then return false end
+    return val
+end
+
+local function GetAllEntities()
+    local list = {}
+    local players = entities.FindByClass("CTerrorPlayer")
+    local commons = entities.FindByClass("CInfected")
+
+    if players then
+        for _, v in pairs(players) do table.insert(list, v) end
+    end
+    if commons then
+        for _, v in pairs(commons) do table.insert(list, v) end
+    end
+    return list
+end
+
+
+local function DrawGlow()
+    if not enable:GetValue() then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+
+    local myTeam = me:GetTeamNumber()
+    local r,g,b,_ = colorpick:GetValue()
+    local a = alpha:GetValue()
+
+    local targets = GetAllEntities()
+    if not targets then return end
+
+    for _, ent in pairs(targets) do
+        if ent ~= me and ent:IsAlive() and not SafeDormant(ent) then
+
+           
+            if teamcheck:GetValue() then
+                local team = ent.GetTeamNumber and ent:GetTeamNumber()
+                if team and team == myTeam then goto continue end
+            end
+
+            local mins   = ent:GetMins()
+            local maxs   = ent:GetMaxs()
+            local origin = ent:GetAbsOrigin()
+
+            if not mins or not maxs or not origin then goto continue end
+
+            local points = {
+                Vector3(mins.x, mins.y, mins.z), Vector3(mins.x, maxs.y, mins.z),
+                Vector3(maxs.x, maxs.y, mins.z), Vector3(maxs.x, mins.y, mins.z),
+                Vector3(mins.x, mins.y, maxs.z), Vector3(mins.x, maxs.y, maxs.z),
+                Vector3(maxs.x, maxs.y, maxs.z), Vector3(maxs.x, mins.y, maxs.z),
+            }
+
+            local left, right, top, bottom
+            for i = 1, #points do
+                local world = origin + points[i]
+                local sx, sy = client.WorldToScreen(world)
+                if sx and sy then
+                    left   = left   and math.min(left, sx) or sx
+                    right  = right  and math.max(right, sx) or sx
+                    top    = top    and math.min(top, sy) or sy
+                    bottom = bottom and math.max(bottom, sy) or sy
+                end
+            end
+
+            if not left or not right or not top or not bottom then goto continue end
+
+            local selected = style:GetValue()
+            local w = right - left
+            local h = bottom - top
+
+            for i = 1, thickness:GetValue() do
+                local glowAlpha = a / i
+                draw.Color(r, g, b, glowAlpha)
+
+           
+                if selected == 0 then
+                    draw.OutlinedRect(left - i, top - i, right + i, bottom + i)
+                end
+
+      
+                if selected == 1 then
+                    local cw, ch = w * 0.25, h * 0.25
+                    draw.Line(left - i, top - i, left + cw, top - i)
+                    draw.Line(left - i, top - i, left - i, top + ch)
+                    draw.Line(right + i, top - i, right - cw, top - i)
+                    draw.Line(right + i, top - i, right + i, top + ch)
+                    draw.Line(left - i, bottom + i, left + cw, bottom + i)
+                    draw.Line(left - i, bottom + i, left, bottom - ch)
+                    draw.Line(right + i, bottom + i, right - cw, bottom + i)
+                    draw.Line(right + i, bottom + i, right, bottom - ch)
+                end
+
+          
+                if selected == 2 then
+                    draw.FilledRect(left - i, top - i, right + i, bottom + i)
+                end
+            end
+            ::continue::
+        end
+    end
+end
+
+callbacks.Register("Draw", DrawGlow)
+
+===== END: Box Esp =====
+
+===== FILE: Bullet Impacts =====
+--Bullet impact
+
+local ref = gui.Reference("Visuals", "World")
+local gb  = gui.Groupbox(ref, "Bullet Impact", 320, 20, 300, 0)
+
+local enable     = gui.Checkbox(gb, "impact.enable",    "Enable Impact Marker", true)
+local show_self  = gui.Checkbox(gb, "impact.self",      "Show Own",             true)
+local show_team  = gui.Checkbox(gb, "impact.team",      "Show Team",            true)
+local show_enemy = gui.Checkbox(gb, "impact.enemy",     "Show Enemy",           true)
+local duration   = gui.Slider(gb,   "impact.duration",  "Duration (x0.1s)",     10, 1, 50)
+local ring_size  = gui.Slider(gb,   "impact.size",      "Ring Size",            8,  2, 30)
+local self_col   = gui.ColorPicker(gb, "impact.selfcol",  "Own Color",    255, 255,   0, 255)
+local team_col   = gui.ColorPicker(gb, "impact.teamcol",  "Team Color",   100, 255, 100, 255)
+local enemy_col  = gui.ColorPicker(gb, "impact.enemycol", "Enemy Color",  255, 100, 100, 255)
+
+local impacts = {}
+
+client.AllowListener("bullet_impact")
+
+callbacks.Register("FireGameEvent", "impact_event", function(event)
+    if not enable:GetValue() then return end
+    if event:GetName() ~= "bullet_impact" then return end
+
+    local userid = event:GetInt("userid")
+    local ix     = event:GetFloat("x")
+    local iy     = event:GetFloat("y")
+    local iz     = event:GetFloat("z")
+
+    local idx    = client.GetPlayerIndexByUserID(userid)
+    local player = entities.GetByIndex(idx)
+    if not player then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+
+    local is_self = (player:GetIndex() == me:GetIndex())
+    local is_team = (player:GetTeamNumber() == me:GetTeamNumber())
+
+    if is_self and not show_self:GetValue() then return end
+    if not is_self and is_team and not show_team:GetValue() then return end
+    if not is_team and not show_enemy:GetValue() then return end
+
+    local dur = duration:GetValue() * 0.1
+
+    table.insert(impacts, {
+        pos     = Vector3(ix, iy, iz),
+        until_  = globals.RealTime() + dur,
+        dur     = dur,
+        is_self = is_self,
+        is_team = is_team,
+    })
+end)
+
+callbacks.Register("Draw", "impact_draw", function()
+    if not enable:GetValue() then return end
+
+    local now  = globals.RealTime()
+    local size = ring_size:GetValue()
+    local i    = 1
+
+    while i <= #impacts do
+        local imp = impacts[i]
+
+        if now > imp.until_ then
+            table.remove(impacts, i)
+        else
+            local sx, sy = client.WorldToScreen(imp.pos)
+            if sx and sy then
+                local alpha = math.floor(((imp.until_ - now) / imp.dur) * 255)
+                alpha = math.max(0, math.min(255, alpha))
+
+                local r, g, b
+                if imp.is_self then
+                    r, g, b, _ = self_col:GetValue()
+                elseif imp.is_team then
+                    r, g, b, _ = team_col:GetValue()
+                else
+                    r, g, b, _ = enemy_col:GetValue()
+                end
+
+                draw.Color(0, 0, 0, math.floor(alpha * 0.5))
+                draw.OutlinedCircle(sx+1, sy+1, size+1)
+                draw.Color(r, g, b, alpha)
+                draw.OutlinedCircle(sx, sy, size)
+                draw.FilledCircle(sx, sy, 2)
+            end
+            i = i + 1
+        end
+    end
+end)
+
+===== END: Bullet Impacts =====
+
+===== FILE: Bullet Tracers =====
+--Simple Tracer
+
+local ref = gui.Reference("Visuals", "World")
+local gb  = gui.Groupbox(ref, "Bullet Tracer", 320, 30, 300, 0)
+
+local enable     = gui.Checkbox(gb, "tracer.enable",    "Enable Tracer",      true)
+local show_self  = gui.Checkbox(gb, "tracer.self",      "Show Own Tracers",   true)
+local show_team  = gui.Checkbox(gb, "tracer.team",      "Show Team Tracers",  true)
+local show_enemy = gui.Checkbox(gb, "tracer.enemy",     "Show Enemy Tracers", true)
+local duration   = gui.Slider(gb,   "tracer.duration",  "Duration (x0.1s)",   5, 1, 30)
+local thickness  = gui.Slider(gb,   "tracer.thickness", "Thickness",          1, 1, 5)
+local self_col   = gui.ColorPicker(gb, "tracer.selfcol",  "Own Color",    255, 255,   0, 255)
+local team_col   = gui.ColorPicker(gb, "tracer.teamcol",  "Team Color",   100, 255, 100, 255)
+local enemy_col  = gui.ColorPicker(gb, "tracer.enemycol", "Enemy Color",  255, 100, 100, 255)
+
+local tracers = {}
+
+client.AllowListener("bullet_impact")
+
+callbacks.Register("FireGameEvent", "tracer_event", function(event)
+    if not enable:GetValue() then return end
+    if event:GetName() ~= "bullet_impact" then return end
+
+    local userid = event:GetInt("userid")
+    local ix     = event:GetFloat("x")
+    local iy     = event:GetFloat("y")
+    local iz     = event:GetFloat("z")
+
+    local idx    = client.GetPlayerIndexByUserID(userid)
+    local player = entities.GetByIndex(idx)
+    if not player then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+
+    local origin = player:GetAbsOrigin()
+    if not origin then return end
+
+    local is_self = (player:GetIndex() == me:GetIndex())
+    local is_team = (player:GetTeamNumber() == me:GetTeamNumber())
+
+    if is_self             and not show_self:GetValue()  then return end
+    if not is_self and is_team  and not show_team:GetValue()  then return end
+    if not is_team         and not show_enemy:GetValue() then return end
+
+    local dur = duration:GetValue() * 0.1
+
+    table.insert(tracers, {
+        start   = origin + Vector3(0, 0, 64),
+        impact  = Vector3(ix, iy, iz),
+        until_  = globals.RealTime() + dur,
+        dur     = dur,
+        is_self = is_self,
+        is_team = is_team,
+    })
+end)
+
+callbacks.Register("Draw", "tracer_draw", function()
+    if not enable:GetValue() then return end
+
+    local now = globals.RealTime()
+    local i   = 1
+
+    while i <= #tracers do
+        local t = tracers[i]
+
+        if now > t.until_ then
+            table.remove(tracers, i)
+        else
+            local sx1, sy1 = client.WorldToScreen(t.start)
+            local sx2, sy2 = client.WorldToScreen(t.impact)
+
+            if sx1 and sy1 and sx2 and sy2 then
+                local alpha = math.floor(((t.until_ - now) / t.dur) * 255)
+                alpha = math.max(0, math.min(255, alpha))
+
+                local r, g, b
+                if t.is_self then
+                    r, g, b, _ = self_col:GetValue()
+                elseif t.is_team then
+                    r, g, b, _ = team_col:GetValue()
+                else
+                    r, g, b, _ = enemy_col:GetValue()
+                end
+
+                local thick = thickness:GetValue()
+
+                draw.Color(0, 0, 0, math.floor(alpha * 0.4))
+                for o = 0, thick - 1 do
+                    draw.Line(sx1+o+1, sy1+1, sx2+o+1, sy2+1)
+                    draw.Line(sx1+1, sy1+o+1, sx2+1, sy2+o+1)
+                end
+
+                draw.Color(r, g, b, alpha)
+                for o = 0, thick - 1 do
+                    draw.Line(sx1+o, sy1, sx2+o, sy2)
+                    draw.Line(sx1, sy1+o, sx2, sy2+o)
+                end
+
+                draw.Color(r, g, b, alpha)
+                draw.FilledCircle(sx2, sy2, 3)
+                draw.Color(255, 255, 255, math.floor(alpha * 0.8))
+                draw.OutlinedCircle(sx2, sy2, 3)
+            end
+
+            i = i + 1
+        end
+    end
+end)
+
+===== END: Bullet Tracers =====

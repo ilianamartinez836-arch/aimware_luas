@@ -1,0 +1,407 @@
+
+===== FILE: Survivor Ragdoll ESP =====
+aka I hate defib 
+
+
+local font   = draw.CreateFont("Tahoma", 13, 700)
+local ref    = gui.Reference("Visuals", "World")
+local gb     = gui.Groupbox(ref, "Dead Body ESP", 16, 500, 200, 0)
+
+local enable = gui.Checkbox(gb, "deadbody.enable", "Enable", true)
+local box    = gui.Checkbox(gb, "deadbody.box", "Box", true)
+local col    = gui.ColorPicker(gb, "deadbody.col", "Renk", 255, 50, 50, 255)
+
+local CHAR_NAMES = {
+    [0] = "Nick/Bill",
+    [1] = "Rochelle/Zoey",
+    [2] = "Coach/Francis",
+    [3] = "Ellis/Louis"
+}
+
+-- box hesaplama
+local function GetBox(ent)
+    local mins = ent:GetMins()
+    local maxs = ent:GetMaxs()
+    local origin = ent:GetAbsOrigin()
+
+    local points = {
+        Vector3(mins.x, mins.y, mins.z),
+        Vector3(mins.x, maxs.y, mins.z),
+        Vector3(maxs.x, maxs.y, mins.z),
+        Vector3(maxs.x, mins.y, mins.z),
+        Vector3(maxs.x, maxs.y, maxs.z),
+        Vector3(mins.x, maxs.y, maxs.z),
+        Vector3(mins.x, mins.y, maxs.z),
+        Vector3(maxs.x, mins.y, maxs.z)
+    }
+
+    local sx, sy = {}, {}
+
+    for i = 1, 8 do
+        local x, y = client.WorldToScreen(origin + points[i])
+        if not x then return nil end
+        sx[i], sy[i] = x, y
+    end
+
+    local left, right = sx[1], sx[1]
+    local top, bottom = sy[1], sy[1]
+
+    for i = 2, 8 do
+        left = math.min(left, sx[i])
+        right = math.max(right, sx[i])
+        top = math.min(top, sy[i])
+        bottom = math.max(bottom, sy[i])
+    end
+
+    return left, top, right, bottom
+end
+
+callbacks.Register("Draw", "deadbody_esp", function()
+    if not enable:GetValue() then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+
+    local mypos = me:GetAbsOrigin()
+    local r, g, b, a = col:GetValue()
+
+    for i = 1, 512 do
+        local ok, e = pcall(function() return entities.GetByIndex(i) end)
+        if not ok or not e then goto continue end
+
+        local ok2, cls = pcall(function() return e:GetClass() end)
+        if not ok2 or cls ~= "CSurvivorDeathModel" then goto continue end
+
+        local ok3, pos = pcall(function() return e:GetAbsOrigin() end)
+        if not ok3 or not pos then goto continue end
+
+        local sx, sy = client.WorldToScreen(pos + Vector3(0, 0, 20))
+        if not sx then goto continue end
+
+        local ok4, char = pcall(function() return e:GetPropInt("m_nCharacterType") end)
+        local name = CHAR_NAMES[ok4 and char or -1] or "Unknown"
+
+        local dist = (pos - mypos):Length()
+        local meters = math.floor(dist * 0.01905)
+
+        local txt = string.format("Dead Body [%s] (%dm)", name, meters)
+
+        draw.SetFont(font)
+        local tw, th = draw.GetTextSize(txt)
+
+        draw.Color(0, 0, 0, 160)
+        draw.FilledRect(sx - tw/2 - 4, sy - th - 4, sx + tw/2 + 4, sy + 4)
+
+        draw.Color(r, g, b, a)
+        draw.OutlinedRect(sx - tw/2 - 4, sy - th - 4, sx + tw/2 + 4, sy + 4)
+
+        draw.Color(r, g, b, a)
+        draw.Text(sx - tw/2, sy - th, txt)
+
+        draw.FilledCircle(sx, sy, 3)
+
+        if box:GetValue() then
+            local x1, y1, x2, y2 = GetBox(e)
+            if x1 then
+                draw.Color(r, g, b, 200)
+                draw.OutlinedRect(x1, y1, x2, y2)
+            end
+        end
+
+        ::continue::
+    end
+end)
+
+===== END: Survivor Ragdoll ESP =====
+
+===== FILE: Tank Fhustration Viewer =====
+local ref = gui.Reference("Visuals", "World")
+local box = gui.Groupbox(ref, "Tank Frustration", 320, 600, 305, 0)
+
+local enable    = gui.Checkbox(box, "tankfrust.enable", "Enable Tank Frustration", true)
+local showNum  = gui.Checkbox(box, "tankfrust.num", "Show Value", true)
+local barWidth  = gui.Slider(box, "tankfrust.barw", "Bar Width", 4, 2, 12)
+local xPad      = gui.Slider(box, "tankfrust.xpad", "X Padding", 4, 0, 20)
+local fontSize  = gui.Slider(box, "tankfrust.fontsize", "Font Size", 13, 8, 24)
+local fontBold  = gui.Checkbox(box, "tankfrust.bold", "Bold Font", true)
+local fontSel  = gui.Combobox(box, "tankfrust.font", "Font",
+    "Tahoma",
+    "Verdana",
+    "Arial",
+    "Trebuchet MS",
+    "Courier New",
+    "Impact",
+    "Georgia",
+    "Comic Sans MS",
+    "Times New Roman"
+)
+
+local frustBuffer = {}
+local lastTeam = -1
+
+local fontCache = nil
+local lastFontState = ""
+
+local fontNames = {
+    "Tahoma", "Verdana", "Arial", "Trebuchet MS",
+    "Courier New", "Impact", "Georgia", "Comic Sans MS", "Times New Roman"
+}
+
+local function UpdateFont()
+    local state = tostring(fontSel:GetValue()) .. "|" .. tostring(fontSize:GetValue()) .. "|" .. tostring(fontBold:GetValue())
+    if state ~= lastFontState then
+        local weight = fontBold:GetValue() and 800 or 400
+        fontCache = draw.CreateFont(fontNames[fontSel:GetValue() + 1], fontSize:GetValue(), weight)
+        lastFontState = state
+    end
+end
+
+local function GetPlayers()
+    local t = entities.FindByClass("CTerrorPlayer")
+    if not t or #t == 0 then t = entities.FindByClass("CCSPlayer") end
+    return t or {}
+end
+
+local function IsTank(ent)
+    if not ent then return false end
+    return (ent:GetPropInt("m_zombieClass") or 0) == 8
+end
+
+local function GetFrustration(ent)
+    if not ent then return 0 end
+    return ent:GetPropInt("m_frustration") or 0
+end
+
+local function GetBoxEdges(ent)
+    local mins  = ent:GetMins()
+    local maxs  = ent:GetMaxs()
+    local origin = ent:GetAbsOrigin()
+    if not mins or not maxs or not origin then return nil end
+
+    local ox, oy, oz = origin.x, origin.y, origin.z
+
+    local corners = {
+        {ox+mins.x, oy+mins.y, oz+mins.z}, {ox+mins.x, oy+maxs.y, oz+mins.z},
+        {ox+maxs.x, oy+mins.y, oz+mins.z}, {ox+maxs.x, oy+maxs.y, oz+mins.z},
+        {ox+mins.x, oy+mins.y, oz+maxs.z}, {ox+mins.x, oy+maxs.y, oz+maxs.z},
+        {ox+maxs.x, oy+mins.y, oz+maxs.z}, {ox+maxs.x, oy+maxs.y, oz+maxs.z},
+    }
+
+    local left, right, top, bottom
+    for _, c in ipairs(corners) do
+        local sx, sy = client.WorldToScreen(Vector3(c[1], c[2], c[3]))
+        if sx and sy then
+            left  = left  and math.min(left, sx)  or sx
+            right  = right  and math.max(right, sx)  or sx
+            top    = top    and math.min(top, sy)    or sy
+            bottom = bottom and math.max(bottom, sy)  or sy
+        end
+    end
+
+    return left, right, top, bottom
+end
+
+callbacks.Register("Draw", function()
+    if not enable:GetValue() then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+
+    local myTeam = me:GetTeamNumber()
+
+    if myTeam ~= lastTeam then
+        frustBuffer = {}
+        lastTeam = myTeam
+    end
+
+    if myTeam ~= 2 then return end
+
+    UpdateFont()
+    if fontCache then draw.SetFont(fontCache) end
+
+    for _, ent in pairs(GetPlayers()) do
+        if IsTank(ent) and ent:IsAlive() and not ent:IsDormant() and ent:GetTeamNumber() == 3 then
+
+            local frust = GetFrustration(ent)
+            frustBuffer[ent:GetIndex()] = frustBuffer[ent:GetIndex()] or 100
+            frustBuffer[ent:GetIndex()] = frustBuffer[ent:GetIndex()] + (frust - frustBuffer[ent:GetIndex()]) * 0.05
+            local val = frustBuffer[ent:GetIndex()]
+
+            local left, right, top, bottom = GetBoxEdges(ent)
+            if not left or not right or not top or not bottom then goto continue end
+
+            local sxBar = right + xPad:GetValue()
+            local syTop = top
+            local syBot = bottom
+            local bw    = barWidth:GetValue()
+
+            
+            draw.Color(255, 255, 255, 220)
+            draw.FilledRect(sxBar, syTop, sxBar + bw, syBot)
+
+            
+            local blackH = (syBot - syTop) * (val / 100)
+            draw.Color(0, 0, 0, 220)
+            draw.FilledRect(sxBar, syTop, sxBar + bw, syTop + blackH)
+
+            
+            draw.Color(0, 0, 0, 255)
+            draw.OutlinedRect(sxBar - 1, syTop - 1, sxBar + bw + 1, syBot + 1)
+            draw.Color(255, 255, 255, 180)
+            draw.OutlinedRect(sxBar - 2, syTop - 2, sxBar + bw + 2, syBot + 2)
+
+           
+            if showNum:GetValue() then
+                local txt = tostring(math.floor(val)) .. "%"
+                local tw, th = draw.GetTextSize(txt)
+
+                local tx = sxBar - 6
+                local ty = syTop - 16
+
+                
+                draw.Color(0, 0, 0, 180)
+                draw.FilledRect(tx - 3, ty - 2, tx + tw + 3, ty + th + 2)
+                draw.Color(255, 255, 255, 200)
+                draw.OutlinedRect(tx - 4, ty - 3, tx + tw + 4, ty + th + 3)
+
+                
+                draw.Color(255, 255, 255, 255)
+                draw.Text(tx, ty, txt)
+            end
+
+            ::continue::
+        end
+    end
+end)
+
+print("FuckmePLZ")
+
+===== END: Tank Fhustration Viewer =====
+
+===== FILE: Tank Lottery Viewer =====
+see who s tank early for pubbers
+
+
+
+
+local ref    = gui.Reference("Visuals", "World")
+local gb     = gui.Groupbox(ref, "Tank Lottery", 320, 600, 220, 0)
+local enable = gui.Checkbox(gb, "lottery.enable", "Enable", true)
+local font   = draw.CreateFont("Tahoma", 13, 700)
+
+callbacks.Register("Draw", "lottery_draw", function()
+    if not enable:GetValue() then return end
+
+    local prs = entities.FindByClass("CTerrorPlayerResource") or {}
+    local pr  = prs[1]
+    if not pr then return end
+
+    local players = entities.FindByClass("CTerrorPlayer") or {}
+    local data    = {}
+    local highest = -1
+
+    for _, e in pairs(players) do
+        if not e:IsAlive() then goto continue end
+        if e:GetTeamNumber() ~= 3 then goto continue end
+
+        local ok1, ratio = pcall(function()
+            return pr:GetPropFloat("m_tankLotterySelectionRatio", idx)
+        end)
+        if not ok1 or not ratio or ratio <= 0 then goto continue end
+
+        if ratio > highest then highest = ratio end
+        table.insert(data, {ent = e, ratio = ratio})
+
+        ::continue::
+    end
+
+    if #data == 0 then return end
+
+    local sw, sh = draw.GetScreenSize()
+    local y = sh * 0.4
+
+    table.sort(data, function(a, b) return a.ratio > b.ratio end)
+
+    draw.SetFont(font)
+    for _, d in ipairs(data) do
+        local name  = d.ent:GetName() or "?"
+        local ratio = d.ratio
+        local isNext = math.abs(ratio - highest) < 0.0001
+
+        local r, g, b
+        if ratio >= 0.7 then
+            r, g, b = 255, 50, 50
+        elseif ratio >= 0.4 then
+            r, g, b = 255, 165, 0
+        else
+            r, g, b = 50, 255, 50
+        end
+
+        local txt = string.format("%s  %.1f%%%s", name, ratio * 100, isNext and "   NEXT" or "")
+
+        draw.Color(0, 0, 0, 200)
+        draw.Text(sw - 261, y + 1, txt)
+        draw.Color(r, g, b, 255)
+        draw.Text(sw - 262, y, txt)
+
+        y = y + 20
+    end
+end)
+
+===== END: Tank Lottery Viewer =====
+
+===== FILE: Temp HP Viewer =====
+basic esp
+
+
+
+--temp hp esp
+
+local DECAY_RATE = 0.27
+local FONT = draw.CreateFont("Tahoma", 13, 600)
+
+local function GetTempHealth(ent)
+    if not ent then return 0 end
+
+    local buffer = ent:GetPropFloat("m_healthBuffer") or 0
+    local bufferTime = ent:GetPropFloat("m_healthBufferTime") or 0
+
+    if buffer <= 0 then
+        return 0
+    end
+
+    local curtime = globals.CurTime()
+    local temp = buffer - ((curtime - bufferTime) * DECAY_RATE)
+
+    if temp < 0 then temp = 0 end
+    return math.floor(temp + 0.5)
+end
+
+callbacks.Register("Draw", function()
+    local players = entities.FindByClass("CTerrorPlayer")
+    if not players then return end
+
+    local x, y = 20, 70
+    local line_h = 16
+
+    draw.SetFont(FONT)
+
+    for i = 1, #players do
+        local ent = players[i]
+
+        if ent:IsAlive() then
+            local tempHP = GetTempHealth(ent)
+
+            if tempHP > 0 then
+                local name = ent:GetName() or "Player"
+
+                draw.Color(0, 200, 0, 255)
+                draw.Text(x, y, name .. "  +" .. tempHP)
+
+                y = y + line_h
+            end
+        end
+    end
+end)
+
+===== END: Temp HP Viewer =====

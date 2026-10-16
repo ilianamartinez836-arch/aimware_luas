@@ -1,0 +1,319 @@
+
+===== FILE: Healthbar Modulation =====
+AS I SAID I LIKE VISUAL SHITS 
+-- barpaintin reversed by murayefeskamus 
+
+local ref        = gui.Reference("Misc", "General", "Extra")
+local hp_enable  = gui.Checkbox(ref, "hp.enable", "Custom Healthbar Color", false)
+local hp_rgb     = gui.Checkbox(ref, "hp.rgb", "RGB Mode", false)
+local hp_color   = gui.ColorPicker(ref, "hp.color", "Stable Color", 0, 255, 255, 255)
+
+pcall(function()
+    ffi.cdef[[
+        void* VirtualAlloc(void* lpAddress, size_t dwSize, uint32_t flAllocationType, uint32_t flProtect);
+        int   VirtualProtect(void* lpAddress, size_t dwSize, uint32_t flNewProtect, uint32_t* lpflOldProtect);
+        void* memcpy(void* dest, const void* src, size_t n);
+    ]]
+end)
+
+local PAGE_EXECUTE_READWRITE = 0x40
+local MEM_COMMIT             = 0x1000
+local MEM_RESERVE            = 0x2000
+local COPY_SIZE              = 7 
+
+local hp_paint_addr = mem.FindPattern(
+    "client.dll",
+    "55 8B EC 83 EC 18 56 8B F1 8B 86 B8 01 00 00 85 C0 0F 88 ?? ?? ?? ??"
+)
+
+if not hp_paint_addr then
+    print("[RGB-HUD] HealthPanel::Paint fonksiyonu bulunamadi!")
+    return
+end
+
+local function GetRainbowColor(speed)
+    local real_time = globals.RealTime() * (speed or 1.0)
+    local r = math.floor(math.sin(real_time) * 127 + 128)
+    local g = math.floor(math.sin(real_time + 2.0) * 127 + 128)
+    local b = math.floor(math.sin(real_time + 4.0) * 127 + 128)
+    return r, g, b, 255
+end
+
+local Paint_t = ffi.typeof("void(__fastcall*)(void*, void*)")
+local g_HP = { orig = nil, hook = nil }
+
+local function Hooked_Paint(thisptr, edx)
+    if g_HP.orig == nil then return end
+
+    if hp_enable:GetValue() then
+        local r, g, b, a
+        
+        if hp_rgb:GetValue() then
+            r, g, b, a = GetRainbowColor(2.5)
+        else
+            r, g, b, a = hp_color:GetValue()
+        end
+        
+        
+        ffi.cast("bool*", ffi.cast("uintptr_t", thisptr) + 383)[0] = false 
+        ffi.cast("bool*", ffi.cast("uintptr_t", thisptr) + 460)[0] = true  
+        
+        local color_int = bit.bor(r, bit.lshift(g, 8), bit.lshift(b, 16), bit.lshift(a, 24))
+        ffi.cast("int*", ffi.cast("uintptr_t", thisptr) + 457)[0] = color_int 
+    end
+
+
+    ffi.cast(Paint_t, g_HP.orig)(thisptr, edx)
+    
+end
+
+
+local tramp = ffi.C.VirtualAlloc(nil, 64, MEM_COMMIT + MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+if tramp ~= nil then
+    ffi.C.memcpy(tramp, ffi.cast("const void*", hp_paint_addr), COPY_SIZE)
+    
+    local jmp_pos  = ffi.cast("uint8_t*", tramp) + COPY_SIZE
+    local ret_addr = ffi.cast("uint8_t*", hp_paint_addr) + COPY_SIZE
+    jmp_pos[0] = 0x68
+    ffi.cast("uint32_t*", jmp_pos + 1)[0] = ffi.cast("uint32_t", ret_addr)
+    jmp_pos[5] = 0xC3
+    
+    g_HP.orig = tramp
+    g_HP.hook = ffi.cast(Paint_t, Hooked_Paint)
+    
+    local old_protect = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", hp_paint_addr), COPY_SIZE, PAGE_EXECUTE_READWRITE, old_protect)
+    
+    local ptr = ffi.cast("uint8_t*", hp_paint_addr)
+    for i = 0, COPY_SIZE - 1 do ptr[i] = 0x90 end
+    
+    ptr[0] = 0x68
+    ffi.cast("uint32_t*", ptr + 1)[0] = ffi.cast("uint32_t", ffi.cast("void*", g_HP.hook))
+    ptr[5] = 0xC3
+    
+    ffi.C.VirtualProtect(ffi.cast("void*", hp_paint_addr), COPY_SIZE, old_protect[0], old_protect)
+    print("[RGB-HUD] Yeni Dual Mod Can Bari Hook'u Basariyla Kuruldu!")
+end
+
+callbacks.Register("Unload", function()
+    if hp_paint_addr and g_HP.orig then
+        local old = ffi.new("uint32_t[1]")
+        ffi.C.VirtualProtect(ffi.cast("void*", hp_paint_addr), COPY_SIZE, PAGE_EXECUTE_READWRITE, old)
+        ffi.C.memcpy(ffi.cast("void*", hp_paint_addr), g_HP.orig, COPY_SIZE)
+        ffi.C.VirtualProtect(ffi.cast("void*", hp_paint_addr), COPY_SIZE, old[0], old)
+        print("[RGB-HUD] Hook guvenli sekilde kaldirildi.")
+    end
+end)
+
+===== END: Healthbar Modulation =====
+
+===== FILE: Hitbox ESP =====
+local ref = gui.Reference("Visuals", "World")
+local box = gui.Groupbox(ref, "Hitbox ESP", 320, 500, 305, 0)
+
+local enable = gui.Checkbox(box, "hitbox.enable", "Enable Hitbox ESP", false)
+local draw_box = gui.Checkbox(box, "hitbox.box", "Draw Box", true)
+local draw_point = gui.Checkbox(box, "hitbox.point", "Draw Point", false)
+
+local size = gui.Slider(box, "hitbox.size", "Point Size", 4, 2, 10, 1)
+local colorpicker = gui.ColorPicker(box, "hitbox.color", "Hitbox Color", 255,0,0,255)
+
+local function DrawHitbox(pos)
+    local x, y = client.WorldToScreen(pos)
+    if not x then return end
+
+    local s = size:GetValue()
+
+    if draw_box:GetValue() then
+        draw.OutlinedRect(x - s, y - s, x + s, y + s)
+    end
+
+    if draw_point:GetValue() then
+        draw.FilledRect(x - 1, y - 1, x + 1, y + 1)
+    end
+end
+
+callbacks.Register("Draw", function()
+    if not enable:GetValue() then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+
+    local players = entities.FindByClass("CTerrorPlayer")
+    if not players then return end
+
+    local r,g,b,a = colorpicker:GetValue()
+    draw.Color(r,g,b,a)
+
+    for _, player in pairs(players) do
+
+        if player:GetIndex() == me:GetIndex() then goto continue end
+        if not player:IsAlive() or player:IsDormant() then goto continue end
+
+        local hitboxes = {
+            0,  -- Head
+            2,  -- Pelvis
+            3,  -- Stomach
+            4,  -- Chest
+            6,7, -- Sol bacak
+            9,10, -- Sol kol
+            13,14, -- Sağ kol
+            15,16 -- Sağ bacak
+        }
+
+        for _, id in pairs(hitboxes) do
+            local pos = player:GetHitboxPosition(id)
+            if pos then
+                DrawHitbox(pos)
+            end
+        end
+
+        ::continue::
+    end
+end)
+
+===== END: Hitbox ESP =====
+
+===== FILE: Hitmarker =====
+idk should work cuz it was b4
+
+player_hurt_concise
+Abbreviated version of 'player_hurt' that is networked
+Structure:	
+userid (short) - user ID who was hurt
+attackerentid (long) - entity id who attacked, if attacker not a player, and userid therefore invalid
+type (long) - damage type
+dmg_health (short) - damage done to health
+
+
+
+
+
+local ref = gui.Reference("Visuals", "Other")
+local box = gui.Groupbox(ref, "Hitmarker & Killmarker", 325, 315, 300, 0)
+
+local enable    = gui.Checkbox(box, "hm.enable",    "Enable Hitmarker",  false)
+local style     = gui.Combobox(box, "hm.style",     "Style",             "X", "Plus", "Dot", "Circle")
+local duration  = gui.Slider(box,   "hm.duration",  "Duration (x0.1s)", 3, 1, 30)
+local size      = gui.Slider(box,   "hm.size",      "Size",              8, 4, 40)
+local thickness = gui.Slider(box,   "hm.thick",     "Thickness",         1, 1, 5)
+
+local hit_color  = gui.ColorPicker(box, "hm.hitcolor",  "Hit Color",  255, 255, 255, 255)
+local kill_color = gui.ColorPicker(box, "hm.killcolor", "Kill Color", 255, 50, 50, 255)
+
+local hits      = {}
+local my_userID = nil
+
+client.AllowListener("player_hurt_concise")
+client.AllowListener("player_death")
+
+local function GetMyUserID()
+    local me = entities.GetLocalPlayer()
+    if not me then return nil end
+    local info = client.GetPlayerInfo(me:GetIndex())
+    return info and info.userID or nil
+end
+
+callbacks.Register("FireGameEvent", "hm_event", function(event)
+    if not enable:GetValue() then return end
+    
+    local eventName = event:GetName()
+    if eventName ~= "player_hurt_concise" and eventName ~= "player_death" then return end
+
+    local attackerID = event:GetInt("attacker")
+    local victimID   = event:GetInt("userid")
+
+    if not my_userID then my_userID = GetMyUserID() end
+    if attackerID ~= my_userID or attackerID == victimID then return end
+
+    local is_kill = false
+    
+    if eventName == "player_hurt_concise" then
+        if event:GetInt("health") <= 0 then is_kill = true end
+    elseif eventName == "player_death" then
+        is_kill = true
+    end
+
+    table.insert(hits, {
+        time = globals.RealTime(),
+        dur  = duration:GetValue() * 0.1,
+        kill = is_kill
+    })
+
+    if #hits > 10 then table.remove(hits, 1) end
+end)
+
+local function DrawX(cx, cy, s, thick)
+    for o = 0, thick - 1 do
+        draw.Line(cx - s + o, cy - s, cx + s + o, cy + s)
+        draw.Line(cx + s + o, cy - s, cx - s + o, cy + s)
+    end
+end
+
+local function DrawPlus(cx, cy, s, thick)
+    for o = 0, thick - 1 do
+        draw.Line(cx - s, cy + o, cx + s, cy + o)
+        draw.Line(cx + o, cy - s, cx + o, cy + s)
+    end
+end
+
+local function DrawDot(cx, cy, s)
+    draw.FilledCircle(cx, cy, math.max(2, s / 3))
+end
+
+local function DrawCircleHM(cx, cy, s, thick)
+    draw.OutlinedCircle(cx, cy, s)
+    if thick >= 2 then draw.OutlinedCircle(cx, cy, s + 1) end
+end
+
+callbacks.Register("Draw", "hm_draw", function()
+    if not enable:GetValue() then return end
+
+    local now    = globals.RealTime()
+    local sw, sh = draw.GetScreenSize()
+    local cx, cy = sw / 2, sh / 2
+    local s      = size:GetValue()
+    local thick  = thickness:GetValue()
+    local sel    = style:GetValue()
+    
+    local hr, hg, hb, _ = hit_color:GetValue()
+    local kr, kg, kb, _ = kill_color:GetValue()
+
+    local i = 1
+    while i <= #hits do
+        local h = hits[i]
+        local expire = h.time + h.dur
+
+        if now > expire then
+            table.remove(hits, i)
+        else
+            local ratio = (expire - now) / h.dur
+            local alpha = math.max(0, math.min(255, math.floor(ratio * 255)))
+
+            local r, g, b = hr, hg, hb
+            if h.kill then r, g, b = kr, kg, kb end
+
+            draw.Color(0, 0, 0, math.floor(alpha * 0.6))
+            if sel == 0 then      DrawX(cx+1, cy+1, s, thick)
+            elseif sel == 1 then  DrawPlus(cx+1, cy+1, s, thick)
+            elseif sel == 2 then  DrawDot(cx+1, cy+1, s)
+            elseif sel == 3 then  DrawCircleHM(cx+1, cy+1, s, thick)
+            end
+
+            draw.Color(r, g, b, alpha)
+            if sel == 0 then      DrawX(cx, cy, s, thick)
+            elseif sel == 1 then  DrawPlus(cx, cy, s, thick)
+            elseif sel == 2 then  DrawDot(cx, cy, s)
+            elseif sel == 3 then  DrawCircleHM(cx, cy, s, thick)
+            end
+
+            i = i + 1
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    my_userID = nil
+end)
+
+===== END: Hitmarker =====

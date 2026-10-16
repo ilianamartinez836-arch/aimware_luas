@@ -1,0 +1,321 @@
+
+===== FILE: Action ESP =====
+"e" button sht esp 
+
+
+
+local font     = draw.CreateFont("Tahoma", 13, 700)
+local ref      = gui.Reference("Visuals", "World")
+local gb       = gui.Groupbox(ref, "Action ESP", 16, 400, 200, 0)
+local enable   = gui.Checkbox(gb, "action.enable", "Enable", true)
+local heal_col = gui.ColorPicker(gb, "action.hcol", "Heal Rengi",  100, 255, 150, 255)
+local jen_col  = gui.ColorPicker(gb, "action.jcol", "Jen Rengi",   255, 200, 50,  255)
+
+local HEAL_DURATION = 5.0
+local JEN_DURATION  = 5.0  
+
+local action_start = {} 
+
+callbacks.Register("Draw", "action_esp", function()
+    if not enable:GetValue() then return end
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+    local now = globals.CurTime()
+
+    local players = entities.FindByClass("CTerrorPlayer") or {}
+    for _, e in pairs(players) do
+        if e:IsDormant() then goto continue end
+        if not e:IsAlive() then goto continue end
+
+        local ok1, action = pcall(function() return e:GetPropInt("m_iCurrentUseAction") end)
+        local idx = e:GetIndex()
+
+        if ok1 and action and (action == 1 or action == 10) then
+            if not action_start[idx] then
+                action_start[idx] = {time = now, atype = action}
+            end
+        else
+            action_start[idx] = nil
+            goto continue
+        end
+
+        local data     = action_start[idx]
+        local elapsed  = now - data.time
+        local isHeal   = data.atype == 1
+        local duration = isHeal and HEAL_DURATION or JEN_DURATION
+        local pct      = math.min(1, elapsed / duration)
+
+        local hr, hg, hb, ha = heal_col:GetValue()
+        local jr, jg, jb, ja = jen_col:GetValue()
+        local r  = isHeal and hr or jr
+        local g  = isHeal and hg or jg
+        local b  = isHeal and hb or jb
+        local a  = isHeal and ha or ja
+
+        local label = isHeal and "HEAL" or "JENERATOR"
+
+        local pos = e:GetAbsOrigin()
+        if not pos then goto continue end
+
+        local sx, sy = client.WorldToScreen(pos + Vector3(0, 0, 90))
+        if not sx or not sy then goto continue end
+
+        local name = e:GetName() or "?"
+        local txt  = string.format("%s  %s  %.0f%%", name, label, pct * 100)
+
+        draw.SetFont(font)
+        local tw, th = draw.GetTextSize(txt)
+
+        local barW = tw + 8
+        local barH = 4
+        local bx   = sx - barW/2
+        local by   = sy + 4
+
+        draw.Color(0, 0, 0, 160)
+        draw.FilledRect(bx, by, bx + barW, by + barH)
+        draw.Color(r, g, b, 200)
+        draw.FilledRect(bx, by, bx + math.floor(barW * pct), by + barH)
+        draw.Color(0, 0, 0, 160)
+        draw.OutlinedRect(bx, by, bx + barW, by + barH)
+
+        draw.Color(0, 0, 0, 200)
+        draw.Text(sx - tw/2 + 1, sy - th + 1, txt)
+        draw.Color(r, g, b, a)
+        draw.Text(sx - tw/2, sy - th, txt)
+
+        ::continue::
+    end
+end)
+
+===== END: Action ESP =====
+
+===== FILE: Ammo ESP =====
+--Ammo esp
+
+local ref = gui.Reference("Visuals", "World")
+local gb  = gui.Groupbox(ref, "Ammo ESP", 320, 400, 300, 0)
+
+local enable        = gui.Checkbox(gb, "ammo.enable",      "Enable Ammo ESP",        true)
+local show_world    = gui.Checkbox(gb, "ammo.world",      "Player World ESP",        true)
+local show_hud      = gui.Checkbox(gb, "ammo.hud",        "Player HUD List",        true)
+local show_floor    = gui.Checkbox(gb, "ammo.floor",      "Floor Weapon ESP",        true)
+local show_melee    = gui.Checkbox(gb, "ammo.melee",      "Show Melee (Floor)",      false)
+local colorpick    = gui.ColorPicker(gb, "ammo.color",    "Player Colour",  255, 220, 80,  255)
+local floor_col    = gui.ColorPicker(gb, "ammo.floorcol", "Floor Colour",  100, 220, 255, 255)
+
+local font    = draw.CreateFont("Tahoma", 13, 700)
+local font_hud = draw.CreateFont("Tahoma", 12, 600)
+
+
+
+local WEP_NAMES = {
+    CPistol              = "Pistol",
+    CMagnumPistol        = "Magnum",
+    CRifle              = "Rifle",
+    CRifle_AK47          = "AK47",
+    CRifle_Desert        = "Desert",
+    CRifle_SG552        = "SG552",
+    CRifle_M60          = "M60",
+    CSMG                = "SMG",
+    CSMG_Silenced        = "SMG-S",
+    CSMG_MP5            = "MP5",
+    CPumpShotgun        = "Pump",
+    CShotgun_Chrome      = "Chrome",
+    CAutoShotgun        = "Auto",
+    CShotgun_SPAS        = "SPAS",
+    CHuntingRifle        = "Hunting",
+    CSniper_Military    = "Sniper",
+    CSniperRifle_AWP    = "AWP",
+    CSniperRifle_Scout  = "Scout",
+    CGrenadeLauncher    = "GL",
+    CTerrorMeleeWeapon  = "Melee",
+    CChainsaw            = "Chainsaw",
+}
+
+local function GetWepName(wclass)
+    return WEP_NAMES[wclass] or wclass
+end
+
+local function DrawOutlinedText(x, y, text, r, g, b, a)
+    draw.SetFont(font)
+    draw.Color(0, 0, 0, 200)
+    draw.Text(x-1, y,  text)
+    draw.Text(x+1, y,  text)
+    draw.Text(x,  y-1, text)
+    draw.Text(x,  y+1, text)
+    draw.Color(r, g, b, a)
+    draw.Text(x, y, text)
+end
+
+
+
+callbacks.Register("Draw", "ammo_esp", function()
+    if not enable:GetValue() then return end
+
+    local sw, sh  = draw.GetScreenSize()
+    local r, g, b, _  = colorpick:GetValue()
+    local fr, fg, fb, _ = floor_col:GetValue()
+
+    -- player
+    local players = entities.FindByClass("CTerrorPlayer") or {}
+
+    local hud_x = 20
+    local hud_y = sh - 220
+
+    if show_hud:GetValue() then
+        draw.SetFont(font_hud)
+        draw.Color(0, 0, 0, 180)
+        draw.Text(hud_x+1, hud_y+1, "-- Ammo --")
+        draw.Color(255, 255, 255, 200)
+        draw.Text(hud_x, hud_y, "-- Ammo --")
+        hud_y = hud_y + 16
+    end
+
+    for _, ent in pairs(players) do
+        if not ent:IsAlive() then goto continue end
+        if ent:IsDormant() then goto continue end
+
+        local wep = ent:GetPropEntity("m_hActiveWeapon")
+        if not wep then goto continue end
+
+        local clip  = wep:GetPropInt("m_iClip1") or -1
+        if clip < 0 then goto continue end
+
+        local wclass = wep:GetClass() or "?"
+        local wname  = GetWepName(wclass)
+        local name  = ent:GetName() or "?"
+
+        
+        local max_clip = 30
+        local ratio    = math.min(1, clip / max_clip)
+        local cr = math.floor(255 * (1 - ratio))
+        local cg = math.floor(255 * ratio)
+        local cb = 0
+
+      
+        if show_world:GetValue() then
+            local origin = ent:GetAbsOrigin()
+            local sx, sy = client.WorldToScreen(origin + Vector3(0, 0, 72))
+            if sx and sy then
+                local label = wname .. " " .. clip
+                local tw, _ = draw.GetTextSize(label)
+                DrawOutlinedText(sx - tw/2, sy, label, cr, cg, cb, 255)
+            end
+        end
+
+        
+        if show_hud:GetValue() then
+            draw.SetFont(font_hud)
+            local line = string.format("%-12s %-8s %d", name, wname, clip)
+            draw.Color(0, 0, 0, 180)
+            draw.Text(hud_x+1, hud_y+1, line)
+            draw.Color(cr, cg, cb, 255)
+            draw.Text(hud_x, hud_y, line)
+            hud_y = hud_y + 14
+        end
+
+        ::continue::
+    end
+
+    -- floor shit
+    if not show_floor:GetValue() then return end
+
+    local ents = entities.FindByClass("CTerrorWeapon") or {}
+    for _, e in pairs(ents) do
+        if e:IsDormant() then goto continue end
+
+        local owner = e:GetPropInt("m_hOwner") or 0
+        if owner ~= -1 then goto continue end
+
+        local wclass = e:GetClass() or "?"
+        local clip  = e:GetPropInt("m_iClip1") or -1
+
+        local is_melee = (wclass == "CTerrorMeleeWeapon" or wclass == "CChainsaw")
+        if is_melee and not show_melee:GetValue() then goto continue end
+
+        local pos = e:GetAbsOrigin()
+        if not pos then goto continue end
+
+        local sx, sy = client.WorldToScreen(pos + Vector3(0, 0, 20))
+        if not sx or not sy then goto continue end
+
+        local wname = GetWepName(wclass)
+        local label
+        if is_melee or clip < 0 then
+            label = wname
+        else
+            label = wname .. " [" .. clip .. "]"
+        end
+
+        local tw, th = draw.GetTextSize(label)
+        draw.Color(0, 0, 0, 150)
+        draw.FilledRect(sx - tw/2 - 3, sy - 2, sx + tw/2 + 3, sy + th + 2)
+        DrawOutlinedText(sx - tw/2, sy, label, fr, fg, fb, 255)
+
+        ::continue::
+    end
+end)
+
+===== END: Ammo ESP =====
+
+===== FILE: Award Viewer =====
+local font = draw.CreateFont("Tahoma", 13, 700)
+local msgs = {}
+
+client.AllowListener("award_earned")
+
+callbacks.Register("FireGameEvent", function(event)
+    if event:GetName() ~= "award_earned" then return end
+
+    local userid = event:GetInt("userid")
+    local award  = event:GetInt("award")
+    local idx    = client.GetPlayerIndexByUserID(userid)
+    local ent    = entities.GetByIndex(idx)
+    local name   = ent and ent:GetName() or ("Player#" .. userid)
+
+    local txt = name .. " → Award #" .. award
+
+    print("[Achievement] " .. txt)
+
+    table.insert(msgs, 1, {
+        text   = txt,
+        time   = globals.RealTime(),
+        expire = globals.RealTime() + 6.0,
+    })
+    if #msgs > 8 then table.remove(msgs) end
+end)
+
+callbacks.Register("Draw", "award_draw", function()
+    if #msgs == 0 then return end
+    local now    = globals.RealTime()
+    local _, sh  = draw.GetScreenSize()
+    draw.SetFont(font)
+
+    local y = sh - 30
+    local i = 1
+    while i <= #msgs do
+        local m = msgs[i]
+        if now > m.expire then
+            table.remove(msgs, i)
+        else
+            local age   = now - m.time
+            local alpha = age < 4.5 and 255 or math.max(0, math.floor(255*(1-(age-4.5)/1.5)))
+            local tw, _ = draw.GetTextSize(m.text)
+
+            draw.Color(0,0,0,math.floor(alpha*0.7))
+            draw.Text(11, y+1, m.text)
+            draw.Color(255,200,50,alpha)
+            draw.Text(10, y, m.text)
+
+            y = y - 18
+            i = i + 1
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("FireGameEvent", "award_draw")
+    callbacks.Unregister("Draw", "award_draw")
+end)
+
+===== END: Award Viewer =====

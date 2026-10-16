@@ -1,0 +1,396 @@
+
+===== FILE: Out Of View =====
+its not my lua but i upgraded it like its better for now also no konsole spam so no error or crash problem just useable 
+
+
+
+
+
+local out_ref = gui.Reference( "Visuals", "World" )
+local out_groupbox = gui.Groupbox(out_ref, "Out of View", 320, 17, 305, 0)
+
+local checkbox = gui.Checkbox(out_groupbox,"oof.checkbox", "Out Of View Extra", true)
+checkbox:SetDescription("Provides out of view indicator with more customizability!")
+local rainbowcheckbox = gui.Checkbox(out_groupbox,"oof.rainbow","Rainbow Arrows",false)
+rainbowcheckbox:SetDescription("RGB mode!")
+
+local showArrows = gui.Checkbox(out_groupbox,"oof.showArrows","Show Arrows",true)
+local showname   = gui.Checkbox(out_groupbox,"oof.showname","Show Name",true)
+
+local colorpicker = gui.ColorPicker(out_groupbox, "oof.color", "Arrow's Colour", 255, 255, 255, 255 )
+local arrowwidth  = gui.Slider(out_groupbox,"oof.arrowwidth","Arrow's Width",3,1,100)
+local arrowheight = gui.Slider(out_groupbox,"oof.arrowheight","Arrow's Height",15,1,100)
+local radius      = gui.Slider(out_groupbox,"oof.radius","Radius",100,100,1000)
+local xoffset     = gui.Slider(out_groupbox,"oof.xoffset","X-axis Offset",0,1,1000)
+xoffset:SetDescription("Defines the ovalness of the circle on x-axis")
+local yoffset     = gui.Slider(out_groupbox,"oof.yoffset","Y-axis Offset",0,1,1000)
+yoffset:SetDescription("Defines the ovalness of the circle on y-axis")
+
+local outviewFatFont = draw.CreateFont("Tahoma", 18)
+
+local function SafeGetProp(ent, prop)
+    local ok, val = pcall(function()
+        return ent:GetProp(prop)
+    end)
+    if not ok then return nil end
+    return val
+end
+
+local function GetPlayers()
+    local p = entities.FindByClass("CTerrorPlayer")
+    if not p or #p == 0 then
+        p = entities.FindByClass("CCSPlayer")
+    end
+    return p
+end
+
+local function IsGhost(ent)
+    local g = SafeGetProp(ent, "m_isGhost")
+    return (g == 1 or g == true)
+end
+
+local function IsObserving(me)
+    local om = SafeGetProp(me, "m_iObserverMode")
+    return (om ~= nil and om ~= 0)
+end
+
+local function IsDormantSafe(ent)
+    local ok, val = pcall(function()
+        return ent:IsDormant()
+    end)
+    if not ok then return false end
+    return val == true
+end
+
+local function ShouldDraw(myTeam, target)
+    if not target or not target:IsAlive() then return false end
+    if IsDormantSafe(target) then return false end
+
+    local tTeam = target:GetTeamNumber()
+
+    if myTeam == 2 then
+        if tTeam ~= 3 then return false end
+        if IsGhost(target) then return false end
+        return true
+    end
+
+    if myTeam == 3 then
+        return (tTeam == 2)
+    end
+
+    return false
+end
+
+local blockUntil = 0
+local lastTeam = -1
+local lastAlive = nil
+local seenLocalOnce = false
+
+local function BumpBlock(seconds)
+    local now = globals.RealTime()
+    local t = now + seconds
+    if t > blockUntil then blockUntil = t end
+end
+
+local function ESP()
+    local me = entities.GetLocalPlayer()
+    if not me then
+        seenLocalOnce = false
+        lastTeam = -1
+        lastAlive = nil
+        blockUntil = 0
+        return
+    end
+
+    local now = globals.RealTime()
+
+    if not seenLocalOnce then
+        seenLocalOnce = true
+        lastTeam = me:GetTeamNumber()
+        lastAlive = me:IsAlive()
+        BumpBlock(0.9)
+        return
+    end
+
+    local myTeam = me:GetTeamNumber()
+    local alive = me:IsAlive()
+
+    if myTeam ~= lastTeam then
+        lastTeam = myTeam
+        BumpBlock(0.9)
+        return
+    end
+
+    if lastAlive ~= nil and alive ~= lastAlive then
+        lastAlive = alive
+        BumpBlock(0.9)
+        return
+    end
+    lastAlive = alive
+
+    if myTeam ~= 2 and myTeam ~= 3 then
+        BumpBlock(0.9)
+        return
+    end
+    if IsObserving(me) then
+        BumpBlock(0.9)
+        return
+    end
+    if not alive then
+        BumpBlock(0.9)
+        return
+    end
+
+    if now < blockUntil then return end
+
+    if not checkbox:GetValue() then return end
+
+    local players = GetPlayers()
+    if not players or #players == 0 then return end
+
+    local finalheight = arrowheight:GetValue() + radius:GetValue()
+    local screen_w, screen_h = draw.GetScreenSize()
+    local cx, cy = screen_w / 2, screen_h / 2
+    local viewangle = engine.GetViewAngles()
+
+    draw.Color(colorpicker:GetValue())
+
+    local v1 = me:GetAbsOrigin()
+    if not v1 then return end
+
+    for _, player in pairs(players) do
+        if player ~= me and ShouldDraw(myTeam, player) then
+            local v2 = player:GetAbsOrigin()
+            if not v2 then goto continue end
+
+            local ang = (v2 - v1):Angles()
+            local yaw = ang.y
+            yaw = yaw * -1
+            yaw = yaw + viewangle.y - 90
+            yaw = math.rad(yaw)
+
+            local w2sx, w2sy = client.WorldToScreen(v2)
+            if (w2sx == nil and w2sy == nil) or w2sx < 100 or w2sy < 100 or w2sx > screen_w-100 or w2sy > screen_h-100 then
+                if showArrows:GetValue() then
+                    local rw = radius:GetValue() + xoffset:GetValue()
+                    local rh = radius:GetValue() + yoffset:GetValue()
+
+                    local a1 = yaw - math.rad(arrowwidth:GetValue() * 100 / rw)
+                    local a2 = yaw + math.rad(arrowwidth:GetValue() * 100 / rw)
+
+                    draw.Triangle(
+                        cx + (rw * math.cos(a1)), cy + (rh * math.sin(a1)),
+                        cx + (rw * math.cos(a2)), cy + (rh * math.sin(a2)),
+                        cx + ((finalheight + xoffset:GetValue()) * math.cos(yaw)),
+                        cy + ((finalheight + yoffset:GetValue()) * math.sin(yaw))
+                    )
+                end
+
+                if showname:GetValue() then
+                    draw.SetFont(outviewFatFont)
+                    draw.Text(
+                        cx + ((finalheight + xoffset:GetValue() + 20) * math.cos(yaw)) - 10,
+                        cy + ((finalheight + yoffset:GetValue() + 10) * math.sin(yaw)) - 5,
+                        player:GetName() or ""
+                    )
+                end
+            end
+
+            ::continue::
+        end
+    end
+end
+
+local function rainbow()
+    if rainbowcheckbox:GetValue() == true and checkbox:GetValue() == true then
+        local frequency = 1
+        local red   = math.sin((globals.RealTime() / frequency) * 4)     * 127 + 128
+        local green = math.sin((globals.RealTime() / frequency) * 4 + 2) * 127 + 128
+        local blue  = math.sin((globals.RealTime() / frequency) * 4 + 4) * 127 + 128
+        colorpicker:SetValue(red,green,blue,255)
+    end
+end
+
+callbacks.Register("Draw", rainbow)
+callbacks.Register("Draw", ESP)
+
+===== END: Out Of View =====
+
+===== FILE: Ping Flag ESP =====
+--ping
+
+local ref = gui.Reference("Visuals","World")
+local box = gui.Groupbox(ref,"Ping ESP",320,400,300)
+
+local enable = gui.Checkbox(box,"pingesp.enable","Enable",1)
+
+local font = draw.CreateFont("Tahoma",16,700)
+
+local function GetPing(index)
+
+    local res = entities.FindByClass("CTerrorPlayerResource")
+
+    if res == nil or #res == 0 then
+        return 0
+    end
+
+    local pr = res[1]
+
+    return pr:GetPropInt("m_iPing",index) or 0
+end
+
+
+local function GetColor(ping)
+
+    if ping <= 70 then
+        return 0,255,0
+    elseif ping <= 140 then
+        return 255,170,0
+    else
+        return 255,0,0
+    end
+end
+
+
+local function DrawBars(x,y,ping,r,g,b)
+
+    local bars = 3
+
+    if ping > 140 then
+        bars = 1
+    elseif ping > 70 then
+        bars = 2
+    end
+
+    local w = 3
+    local h = 3
+    local gap = 2
+
+    for i=1,3 do
+
+        if i <= bars then
+            draw.Color(r,g,b,255)
+        else
+            draw.Color(60,60,60,200)
+        end
+
+        draw.FilledRect(
+            x + (i*(w+gap)),
+            y - (i*2),
+            x + (i*(w+gap)) + w,
+            y
+        )
+    end
+end
+
+
+callbacks.Register("Draw",function()
+
+    if not enable:GetValue() then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+
+    draw.SetFont(font)
+
+    local players = entities.FindByClass("CTerrorPlayer")
+
+    for i,ent in pairs(players) do
+
+        if not ent:IsAlive() then goto skip end
+        if ent:IsDormant() then goto skip end
+        if ent == me then goto skip end
+
+        local head = ent:GetHitboxPosition(10)
+        if head == nil then goto skip end
+
+        local sx,sy = client.WorldToScreen(head)
+        if sx == nil then goto skip end
+
+        local ping = GetPing(ent:GetIndex())
+
+        local r,g,b = GetColor(ping)
+
+        local text = ping .. "ms"
+
+        draw.Color(r,g,b,255)
+
+        local tw,th = draw.GetTextSize(text)
+
+        draw.Text(sx - tw/2, sy-10, text)
+
+        DrawBars(sx + tw/2 + 4, sy-4, ping, r,g,b)
+
+        ::skip::
+
+    end
+
+end)
+
+===== END: Ping Flag ESP =====
+
+===== FILE: Rescue Door ESP =====
+local font   = draw.CreateFont("Tahoma", 13, 700)
+local ref    = gui.Reference("Visuals", "World")
+local gb     = gui.Groupbox(ref, "Rescue Door ESP", 16, 400, 200, 0)
+local enable   = gui.Checkbox(gb, "rdoor.enable", "Enable", true)
+local max_dist = gui.Slider(gb, "rdoor.dist", "Max Mesafe (m)", 100, 5, 500)
+local col      = gui.ColorPicker(gb, "rdoor.col", "Renk", 50, 255, 150, 255)
+
+local door_cache = {}
+local last_scan  = 0
+
+local function ScanDoors()
+    local now = globals.RealTime()
+    if now - last_scan < 5 then return end
+    last_scan = now
+
+    door_cache = {}
+    for i = 1, 512 do
+        local ok, e = pcall(function() return entities.GetByIndex(i) end)
+        if ok and e then
+            local ok2, v = pcall(function() return e:GetPropInt("m_isRescueDoor") end)
+            if ok2 and v and v ~= 0 then
+                table.insert(door_cache, e)
+            end
+        end
+    end
+end
+
+callbacks.Register("Draw", "rdoor_esp", function()
+    if not enable:GetValue() then return end
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+    local mypos  = me:GetAbsOrigin()
+    local max_m  = max_dist:GetValue()
+    local r, g, b, a = col:GetValue()
+
+    ScanDoors()
+
+    for _, e in ipairs(door_cache) do
+        local ok, pos = pcall(function() return e:GetAbsOrigin() end)
+        if not ok or not pos then goto continue end
+
+        local dist = (pos - mypos):Length() * 0.01905
+        if dist > max_m then goto continue end
+
+        local sx, sy = client.WorldToScreen(pos + Vector3(0, 0, 50))
+        if not sx or not sy then goto continue end
+
+        local txt = string.format("Rescue Door  %.0fm", dist)
+        draw.SetFont(font)
+        local tw, th = draw.GetTextSize(txt)
+
+        draw.Color(0, 0, 0, 160)
+        draw.FilledRect(sx - tw/2 - 4, sy - th - 4, sx + tw/2 + 4, sy + 4)
+        draw.Color(r, g, b, a)
+        draw.OutlinedRect(sx - tw/2 - 4, sy - th - 4, sx + tw/2 + 4, sy + 4)
+        draw.Color(r, g, b, a)
+        draw.Text(sx - tw/2, sy - th, txt)
+        draw.FilledCircle(sx, sy, 3)
+
+        ::continue::
+    end
+end)
+
+===== END: Rescue Door ESP =====

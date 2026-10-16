@@ -1,0 +1,344 @@
+
+===== FILE: Hittible ESP =====
+Its half now. Ill recreate it but wanna share this version. Ima developin my cheat "Invictus" rn so i cant write new luas. 
+But ill return to Aimware lua developing soon just use it. It has DC first 4 map i guess i used "Prop index finder lua"
+for findin idxes its so basic find any hittibles special index and read it. so u guys can upgreade this one or just wait my chit
+
+
+
+
+local ref = gui.Reference("Visuals", "Other")
+local box = gui.Groupbox(ref, "Object ESP", 325, 315, 300, 0)
+local enable = gui.Checkbox(box, "oesp.enable", "Enable", true)
+local max_dist = gui.Slider(box, "oesp.dist", "Max Distance", 1000, 1000, 100000)
+local font_sel = gui.Combobox(box, "oesp.font", "Font", "Falena", "Tahoma", "Arial", "Verdana", "Segoe UI", "Courier New")
+
+local col_araba    = gui.ColorPicker(box, "oesp.col.araba",    "Araba",      255, 150, 0,   255)
+local col_forklift = gui.ColorPicker(box, "oesp.col.forklift", "Forklift",   255, 255, 0,   255)
+local col_cop      = gui.ColorPicker(box, "oesp.col.cop",      "Cop Kutusu", 150, 150, 150, 255)
+
+local FONT_NAMES = { "Falena", "Tahoma", "Arial", "Verdana", "Segoe UI", "Courier New" }
+local fonts = {}
+for _, name in ipairs(FONT_NAMES) do
+    fonts[name] = draw.CreateFont(name, 13, 700)
+end
+
+local MODELS = {
+    [516] = "araba",
+    [517] = "araba",
+    [518] = "araba",
+    [519] = "araba",
+    [594] = "araba",
+    [595] = "araba",
+    [596] = "araba",
+    [597] = "araba",
+    [622] = "forklift",
+    [561] = "cop",
+}
+
+local LABELS = {
+    araba    = "ARABA",
+    forklift = "FORKLIFT",
+    cop      = "COP KUTUSU",
+}
+
+local function GetColor(kind)
+    if kind == "araba"    then return col_araba:GetValue() end
+    if kind == "forklift" then return col_forklift:GetValue() end
+    if kind == "cop"      then return col_cop:GetValue() end
+    return 255, 255, 255, 255
+end
+
+local function DrawOutlinedText(x, y, r, g, b, text)
+    draw.Color(0, 0, 0, 255)
+    for ox = -1, 1 do
+        for oy = -1, 1 do
+            if ox ~= 0 or oy ~= 0 then
+                draw.Text(x + ox, y + oy, text)
+            end
+        end
+    end
+    draw.Color(r, g, b, 255)
+    draw.Text(x, y, text)
+end
+
+callbacks.Register("Draw", "object_esp", function()
+    if not enable:GetValue() then return end
+
+    local fname = FONT_NAMES[font_sel:GetValue() + 1] or "Falena"
+    local font = fonts[fname]
+    draw.SetFont(font)
+
+    local lp = entities.GetLocalPlayer()
+    local mypos = lp and lp:GetAbsOrigin()
+    local maxd = max_dist:GetValue()
+
+    local classes = { "CPhysicsProp", "CDynamicProp" }
+    local drawn = {}
+
+    for _, cls in ipairs(classes) do
+        local ents = entities.FindByClass(cls)
+        if ents then
+            for _, ent in pairs(ents) do
+                if not ent:IsDormant() then
+                    local ok, idx = pcall(function()
+                        return ent:GetPropInt("m_nModelIndex")
+                    end)
+                    if ok and idx and MODELS[idx] then
+                        local origin = ent:GetAbsOrigin()
+                        if origin then
+                            local key = string.format("%.0f%.0f%.0f", origin.x, origin.y, origin.z)
+                            if not drawn[key] then
+                                drawn[key] = true
+
+                                local dist = 0
+                                if mypos then
+                                    local dx = origin.x - mypos.x
+                                    local dy = origin.y - mypos.y
+                                    local dz = origin.z - mypos.z
+                                    dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                                end
+
+                                local distm = math.floor(dist / 52)
+                                if distm > maxd / 52 then goto continue end
+
+                                local sx, sy = client.WorldToScreen(
+                                    Vector3(origin.x, origin.y, origin.z + 50))
+                                if sx then
+                                    local kind = MODELS[idx]
+                                    local r, g, b, _ = GetColor(kind)
+                                    local label = LABELS[kind]
+                                    local text = string.format("%s [%dm]", label, distm)
+                                    local tw, _ = draw.GetTextSize(text)
+                                    DrawOutlinedText(sx - tw/2, sy, r, g, b, text)
+                                end
+
+                                ::continue::
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+===== END: Hittible ESP =====
+
+===== FILE: Kill Counter =====
+local font = draw.CreateFont("Tahoma", 18, 700)
+
+local stats = {}
+
+callbacks.Register("FireGameEvent", function(e)
+
+    local name = e:GetName()
+
+    if name == "round_start" or name == "map_transition" then
+        stats = {}
+    end
+
+end)
+
+callbacks.Register("FireGameEvent", function(event)
+
+    if event:GetName() ~= "player_hurt" then return end
+
+    local attackerID = event:GetInt("attacker")
+    local dmg = event:GetInt("dmg_health")
+
+    if attackerID == 0 then return end
+
+    local attackerIndex = client.GetPlayerIndexByUserID(attackerID)
+    if not attackerIndex then return end
+
+    local attacker = entities.GetByIndex(attackerIndex)
+    if not attacker then return end
+
+    if attacker:GetTeamNumber() ~= 2 then return end
+
+    local name = attacker:GetName() or "Unknown"
+
+    if stats[name] == nil then
+        stats[name] = {dmg = 0, kills = 0}
+    end
+
+    stats[name].dmg = stats[name].dmg + dmg
+
+end)
+
+callbacks.Register("FireGameEvent", function(event)
+
+    if event:GetName() ~= "player_death" then return end
+
+    local attackerID = event:GetInt("attacker")
+    if attackerID == 0 then return end
+
+    local attackerIndex = client.GetPlayerIndexByUserID(attackerID)
+    if not attackerIndex then return end
+
+    local attacker = entities.GetByIndex(attackerIndex)
+    if not attacker then return end
+
+    if attacker:GetTeamNumber() ~= 2 then return end
+
+    local name = attacker:GetName() or "Unknown"
+
+    if stats[name] == nil then
+        stats[name] = {dmg = 0, kills = 0}
+    end
+
+    stats[name].kills = stats[name].kills + 1
+
+end)
+
+callbacks.Register("Draw", function()
+
+    draw.SetFont(font)
+
+    local y = 200
+
+    draw.Color(255,255,0,255)
+    draw.Text(20, y, "Survivor Stats")
+    y = y + 25
+
+    for name, data in pairs(stats) do
+
+        draw.Color(255,255,255,255)
+
+        draw.Text(
+            20,
+            y,
+            name .. " | " .. data.dmg .. " DMG | " .. data.kills .. " KILLS"
+        )
+
+        y = y + 20
+
+    end
+
+end)
+
+===== END: Kill Counter =====
+
+===== FILE: Kill Marker =====
+-- Killmarker l4d2
+
+local ref = gui.Reference("Visuals", "Other")
+local box = gui.Groupbox(ref, "Hitmarker", 325, 315, 300, 0)
+
+local enable    = gui.Checkbox(box, "hm.enable",    "Enable Hitmarker",  false)
+local style     = gui.Combobox(box, "hm.style",     "Style",             "X", "Plus", "Dot", "Circle")
+local duration  = gui.Slider(box,   "hm.duration",  "Duration (x0.1s)", 5, 1, 30)
+local size      = gui.Slider(box,   "hm.size",      "Size",             10, 4, 40)
+local thickness = gui.Slider(box,   "hm.thick",     "Thickness",        2, 1, 5)
+local only_me   = gui.Checkbox(box, "hm.onlyme",    "Sadece Benim Killlerim", true)
+
+local kill_color = gui.ColorPicker(box, "hm.killcolor", "Kill Color", 255, 50, 50, 255)
+
+local hits      = {}
+local my_userID = nil
+
+client.AllowListener("player_death")
+
+local function GetMyUserID()
+    local me = entities.GetLocalPlayer()
+    if not me then return nil end
+    local info = client.GetPlayerInfo(me:GetIndex())
+    if not info then return nil end
+    return info.userID
+end
+
+callbacks.Register("FireGameEvent", "hm_event", function(event)
+    if not enable:GetValue() then return end
+    if event:GetName() ~= "player_death" then return end
+
+    local attackerID = event:GetInt("attacker")
+    local victimID   = event:GetInt("userid")
+    if attackerID == 0 or attackerID == victimID then return end
+
+    if only_me:GetValue() then
+        if not my_userID then my_userID = GetMyUserID() end
+        if not my_userID then return end
+        if attackerID ~= my_userID then return end
+    end
+
+    table.insert(hits, {
+        time = globals.RealTime(),
+        dur  = duration:GetValue() * 0.1,
+    })
+
+    if #hits > 20 then table.remove(hits, 1) end
+end)
+
+local function DrawX(cx, cy, s, thick)
+    for o = 0, thick - 1 do
+        draw.Line(cx - s + o, cy - s, cx + s + o, cy + s)
+        draw.Line(cx + s + o, cy - s, cx - s + o, cy + s)
+    end
+end
+
+local function DrawPlus(cx, cy, s, thick)
+    for o = 0, thick - 1 do
+        draw.Line(cx - s, cy + o, cx + s, cy + o)
+        draw.Line(cx + o, cy - s, cx + o, cy + s)
+    end
+end
+
+local function DrawDot(cx, cy, s)
+    draw.FilledCircle(cx, cy, math.max(2, s / 3))
+end
+
+local function DrawCircleHM(cx, cy, s, thick)
+    draw.OutlinedCircle(cx, cy, s)
+    if thick >= 2 then draw.OutlinedCircle(cx, cy, s + 1) end
+    if thick >= 3 then draw.OutlinedCircle(cx, cy, s - 1) end
+end
+
+callbacks.Register("Draw", "hm_draw", function()
+    if not enable:GetValue() then return end
+
+    local now    = globals.RealTime()
+    local sw, sh = draw.GetScreenSize()
+    local cx, cy = sw / 2, sh / 2
+    local s      = size:GetValue()
+    local thick  = thickness:GetValue()
+    local sel    = style:GetValue()
+    local r, g, b, _ = kill_color:GetValue()
+
+    local i = 1
+    while i <= #hits do
+        local h = hits[i]
+        local expire = h.time + h.dur
+
+        if now > expire then
+            table.remove(hits, i)
+        else
+            local ratio = (expire - now) / h.dur
+            local alpha = math.max(0, math.min(255, math.floor(ratio * 255)))
+
+            draw.Color(0, 0, 0, math.floor(alpha * 0.5))
+            if sel == 0 then      DrawX(cx+1,        cy+1, s, thick)
+            elseif sel == 1 then  DrawPlus(cx+1,     cy+1, s, thick)
+            elseif sel == 2 then  DrawDot(cx+1,      cy+1, s)
+            elseif sel == 3 then  DrawCircleHM(cx+1, cy+1, s, thick)
+            end
+
+            draw.Color(r, g, b, alpha)
+            if sel == 0 then      DrawX(cx,        cy, s, thick)
+            elseif sel == 1 then  DrawPlus(cx,     cy, s, thick)
+            elseif sel == 2 then  DrawDot(cx,      cy, s)
+            elseif sel == 3 then  DrawCircleHM(cx, cy, s, thick)
+            end
+
+            i = i + 1
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("FireGameEvent", "hm_event")
+    callbacks.Unregister("Draw", "hm_draw")
+    my_userID = nil
+end)
+
+===== END: Kill Marker =====

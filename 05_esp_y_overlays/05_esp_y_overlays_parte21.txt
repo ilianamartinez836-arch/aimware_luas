@@ -1,0 +1,324 @@
+
+===== FILE: Spectator Tracker =====
+local font     = draw.CreateFont("Tahoma", 13, 700)
+local ref      = gui.Reference("Visuals", "World")
+local gb       = gui.Groupbox(ref, "Spectator ESP", 16, 600, 220, 0)
+local enable   = gui.Checkbox(gb, "spec.enable", "Enable", true)
+local col      = gui.ColorPicker(gb, "spec.col", "Renk", 200, 150, 255, 255)
+
+local spec_cache = {}
+local last_scan  = 0
+
+local function ScanSpecs()
+    local now = globals.RealTime()
+    if now - last_scan < 0.2 then return end
+    last_scan = now
+
+    spec_cache = {}
+    local players = entities.FindByClass("CTerrorPlayer") or {}
+    for _, e in pairs(players) do
+        local ok, mode = pcall(function() return e:GetPropInt("m_iObserverMode") end)
+        if ok and mode and mode > 0 then
+            table.insert(spec_cache, e)
+        end
+    end
+end
+
+callbacks.Register("Draw", "spec_esp", function()
+    if not enable:GetValue() then return end
+    local me = entities.GetLocalPlayer()
+    if not me then return end
+    local r, g, b, a = col:GetValue()
+    local sw, sh     = draw.GetScreenSize()
+    local myidx      = me:GetIndex()
+
+    ScanSpecs()
+
+    local watching_me = {}
+    local free_cam    = {}
+
+    for _, e in ipairs(spec_cache) do
+        if e:GetIndex() == myidx then goto continue end
+
+        local ok1, mode = pcall(function() return e:GetPropInt("m_iObserverMode") end)
+        if not ok1 or not mode or mode == 0 then goto continue end
+
+        local ok2, tgt = pcall(function() return e:GetPropInt("m_hObserverTarget") end)
+        local name = e:GetName() or "?"
+
+        if ok2 and tgt and tgt > 0 then
+            local tgtEnt = entities.GetByIndex(tgt % 2048)
+            if tgtEnt and tgtEnt:GetIndex() == myidx then
+                table.insert(watching_me, name)
+            elseif tgtEnt then
+                local ok3, tpos = pcall(function() return tgtEnt:GetAbsOrigin() end)
+                if ok3 and tpos then
+                    local sx, sy = client.WorldToScreen(tpos + Vector3(0, 0, 100))
+                    if sx and sy then
+                        local tname = tgtEnt:GetName() or "?"
+                        local txt = string.format("[SPEC] %s → %s", name, tname)
+                        draw.SetFont(font)
+                        local tw, _ = draw.GetTextSize(txt)
+                        draw.Color(0, 0, 0, 200)
+                        draw.Text(sx - tw/2 + 1, sy + 1, txt)
+                        draw.Color(r, g, b, a)
+                        draw.Text(sx - tw/2, sy, txt)
+                    end
+                end
+            end
+        else
+            local ok3, pos = pcall(function() return e:GetAbsOrigin() end)
+            if ok3 and pos then
+                table.insert(free_cam, {name=name, pos=pos})
+            end
+        end
+
+        ::continue::
+    end
+
+    if #watching_me > 0 then
+        local y = 20
+        draw.SetFont(font)
+        for _, n in ipairs(watching_me) do
+            local txt = "👁 " .. n .. " seni izliyor"
+            local tw, _ = draw.GetTextSize(txt)
+            draw.Color(0, 0, 0, 200)
+            draw.Text(sw - tw - 9, y + 1, txt)
+            draw.Color(255, 80, 80, 255)
+            draw.Text(sw - tw - 10, y, txt)
+            y = y + 18
+        end
+    end
+
+    for _, fc in ipairs(free_cam) do
+        local sx, sy = client.WorldToScreen(fc.pos)
+        if sx and sy then
+            local txt = string.format("[SPEC] %s (Son Konum)", fc.name)
+            draw.SetFont(font)
+            local tw, _ = draw.GetTextSize(txt)
+            draw.Color(0, 0, 0, 200)
+            draw.Text(sx - tw/2 + 1, sy + 1, txt)
+            draw.Color(r, g, b, a)
+            draw.Text(sx - tw/2, sy, txt)
+            draw.FilledCircle(sx, sy, 4)
+        end
+    end
+end)
+
+===== END: Spectator Tracker =====
+
+===== FILE: Speedgraph =====
+local ref = gui.Reference("Visuals", "World")
+local box = gui.Groupbox(ref, "Speed Graph", 320, 620, 305, 0)
+
+local enable  = gui.Checkbox(box, "speedgraph.enable", "Enable Speed Graph", false)
+local width   = gui.Slider(box, "speedgraph.width", "Graph Width", 200, 100, 400)
+local height  = gui.Slider(box, "speedgraph.height", "Graph Height", 40, 20, 100)
+local samples = gui.Slider(box, "speedgraph.samples", "Samples", 80, 30, 200)
+
+local speedBuffer = {}
+
+local function GetSpeed2D(p)
+    if not p then return 0 end
+
+    local vx = p:GetPropFloat("localdata", "m_vecVelocity[0]")
+    local vy = p:GetPropFloat("localdata", "m_vecVelocity[1]")
+
+    if not vx or not vy then return 0 end
+
+    return math.sqrt(vx * vx + vy * vy)
+end
+
+callbacks.Register("Draw", function()
+    if not enable:GetValue() then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+
+    local screenX, screenY = draw.GetScreenSize()
+
+    local baseX = screenX / 2 - width:GetValue() / 2
+     local baseY = screenY - 125
+
+    local speed = GetSpeed2D(me)
+
+    table.insert(speedBuffer, 1, speed)
+    if #speedBuffer > samples:GetValue() then
+        table.remove(speedBuffer)
+    end
+
+    draw.Color(255, 255, 255, 80)
+    draw.Line(baseX, baseY, baseX + width:GetValue(), baseY)
+
+    for i = 1, #speedBuffer - 1 do
+        local s1 = speedBuffer[i]
+        local s2 = speedBuffer[i + 1]
+
+        local maxSpeed = 260
+        local y1 = baseY - math.min(s1, maxSpeed) / maxSpeed * height:GetValue()
+        local y2 = baseY - math.min(s2, maxSpeed) / maxSpeed * height:GetValue()
+
+        local x1 = baseX + (i - 1) * (width:GetValue() / samples:GetValue())
+        local x2 = baseX + i * (width:GetValue() / samples:GetValue())
+
+        if s1 < 5 then
+            draw.Color(0, 255, 0, 200)       
+        elseif s1 < 120 then
+            draw.Color(255, 200, 0, 200)    
+        else
+            draw.Color(255, 80, 80, 200)   
+        end
+
+        draw.Line(x1, y1, x2, y2)
+    end
+end)
+
+===== END: Speedgraph =====
+
+===== FILE: Spit Pool ESP =====
+--spit
+
+local ref = gui.Reference("Visuals", "World")
+local gb  = gui.Groupbox(ref, "Spitter Acid ESP", 320, 400, 300, 0)
+
+local enable   = gui.Checkbox(gb, "acid.enable",  "Enable Acid ESP",   true)
+local show_circle = gui.Checkbox(gb, "acid.circle", "Ground Circle",   true)
+local show_timer  = gui.Checkbox(gb, "acid.timer",  "Timer Bar",       true)
+local show_line   = gui.Checkbox(gb, "acid.line",   "Line to Acid",    true)
+local acid_col    = gui.ColorPicker(gb, "acid.col", "Color", 100, 255, 50, 255)
+
+local font = draw.CreateFont("Tahoma", 13, 700)
+
+local ACID_DURATION = 7.0  -- saniye
+local acid_spawns   = {}    -- [entIndex] = spawnTime
+
+callbacks.Register("Draw", "acid_esp", function()
+    if not enable:GetValue() then return end
+
+    local lp = entities.GetLocalPlayer()
+    if not lp then return end
+    local mypos = lp:GetAbsOrigin()
+    local now   = globals.CurTime()
+
+    local sw, sh = draw.GetScreenSize()
+    local r, g, b, a = acid_col:GetValue()
+
+    local swarms = entities.FindByClass("CInsectSwarm") or {}
+
+    for _, e in pairs(swarms) do
+        local idx = e:GetIndex()
+        if not acid_spawns[idx] then
+            acid_spawns[idx] = now
+        end
+    end
+
+    for idx, _ in pairs(acid_spawns) do
+        local e = entities.GetByIndex(idx)
+        if not e or e:GetClass() ~= "CInsectSwarm" then
+            acid_spawns[idx] = nil
+        end
+    end
+
+    for _, e in pairs(swarms) do
+        local idx = e:GetIndex()
+
+        local ok, orig = pcall(function() return e:GetPropVector("m_vecOrigin") end)
+        if not ok or not orig then goto continue end
+
+        local spawnTime = acid_spawns[idx] or now
+        local elapsed   = now - spawnTime
+        local remaining = ACID_DURATION - elapsed
+        if remaining <= 0 then goto continue end
+
+        local ratio = remaining / ACID_DURATION  
+
+        local cr = math.floor(255 * (1 - ratio))
+        local cg = math.floor(255 * ratio)
+        local cb = 0
+        local ca = math.floor(180 * ratio + 60)
+
+        local sx, sy = client.WorldToScreen(orig)
+
+        if show_circle:GetValue() then
+            local segs   = 32
+            local radius = 120  
+            local prev_x, prev_y = nil, nil
+
+            for i = 0, segs do
+                local angle = (i / segs) * math.pi * 2
+                local wx = orig.x + math.cos(angle) * radius
+                local wy = orig.y + math.sin(angle) * radius
+                local wx2, wy2 = client.WorldToScreen(Vector3(wx, wy, orig.z + 5))
+                if wx2 and wy2 then
+                    if prev_x and prev_y then
+                        draw.Color(0, 0, 0, math.floor(ca * 0.5))
+                        draw.Line(prev_x+1, prev_y+1, wx2+1, wy2+1)
+                        draw.Color(cr, cg, cb, ca)
+                        draw.Line(prev_x, prev_y, wx2, wy2)
+                    end
+                    prev_x, prev_y = wx2, wy2
+                end
+            end
+
+            if sx and sy then
+                draw.Color(cr, cg, cb, ca)
+                draw.FilledCircle(sx, sy, 4)
+                draw.Color(255, 255, 255, 200)
+                draw.OutlinedCircle(sx, sy, 4)
+            end
+        end
+
+        if show_timer:GetValue() and sx and sy then
+            local barW = 60
+            local barH = 6
+            local bx   = sx - barW / 2
+            local by   = sy - 20
+
+            draw.Color(0, 0, 0, 160)
+            draw.FilledRect(bx, by, bx + barW, by + barH)
+
+            draw.Color(cr, cg, cb, 220)
+            draw.FilledRect(bx, by, bx + math.floor(barW * ratio), by + barH)
+
+            draw.Color(0, 0, 0, 180)
+            draw.OutlinedRect(bx, by, bx + barW, by + barH)
+
+            draw.SetFont(font)
+            local txt = string.format("%.1fs", remaining)
+            local tw, _ = draw.GetTextSize(txt)
+            draw.Color(0, 0, 0, 200)
+            draw.Text(sx - tw/2 + 1, by - 14 + 1, txt)
+            draw.Color(cr, cg, cb, 255)
+            draw.Text(sx - tw/2, by - 14, txt)
+
+            local ok2, ownerHandle = pcall(function()
+                return e:GetPropInt("m_hOwnerEntity")
+            end)
+            if ok2 and ownerHandle then
+                local ownerEnt = entities.GetByIndex(ownerHandle % 2048)
+                if ownerEnt then
+                    local ownerName = ownerEnt:GetName() or ownerEnt:GetClass()
+                    local nw, _ = draw.GetTextSize(ownerName)
+                    draw.Color(0, 0, 0, 180)
+                    draw.Text(sx - nw/2 + 1, by - 28 + 1, ownerName)
+                    draw.Color(200, 255, 100, 220)
+                    draw.Text(sx - nw/2, by - 28, ownerName)
+                end
+            end
+        end
+
+        if show_line:GetValue() and sx and sy then
+            local msx, msy = client.WorldToScreen(mypos)
+            if msx and msy then
+                draw.Color(0, 0, 0, 80)
+                draw.Line(msx+1, msy+1, sx+1, sy+1)
+                draw.Color(cr, cg, cb, math.floor(ca * 0.6))
+                draw.Line(msx, msy, sx, sy)
+            end
+        end
+
+        ::continue::
+    end
+end)
+
+===== END: Spit Pool ESP =====
