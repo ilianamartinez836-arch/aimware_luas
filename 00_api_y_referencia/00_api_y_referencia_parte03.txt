@@ -1,0 +1,270 @@
+
+===== FILE: Sequence Reader =====
+--Sequence Reader
+
+local ref = gui.Reference("Visuals", "Other")
+local gb  = gui.Groupbox(ref, "Sequence Reader", 325, 315, 300, 0)
+
+local enable      = gui.Checkbox(gb, "seqr.enable", "Enable Sequence Reader", true)
+local show_team   = gui.Checkbox(gb, "seqr.team",   "Show Team",              true)
+local show_enemy  = gui.Checkbox(gb, "seqr.enemy",  "Show Enemy",             true)
+local team_col    = gui.ColorPicker(gb, "seqr.teamcol",  "Team Color",  100, 255, 100, 255)
+local enemy_col   = gui.ColorPicker(gb, "seqr.enemycol", "Enemy Color", 255, 100, 100, 255)
+
+local font = draw.CreateFont("Tahoma", 12, 600)
+
+local function DrawOutlinedText(x, y, text, r, g, b, a)
+    draw.SetFont(font)
+    draw.Color(0, 0, 0, 200)
+    draw.Text(x-1, y,   text)
+    draw.Text(x+1, y,   text)
+    draw.Text(x,   y-1, text)
+    draw.Text(x,   y+1, text)
+    draw.Color(r, g, b, a)
+    draw.Text(x, y, text)
+end
+
+callbacks.Register("Draw", "seq_reader", function()
+    if not enable:GetValue() then return end
+
+    local lp = entities.GetLocalPlayer()
+    if not lp then return end
+
+    local players = entities.FindByClass("CTerrorPlayer") or {}
+    for _, ent in pairs(players) do
+        if not ent:IsAlive() then goto continue end
+        if ent:IsDormant() then goto continue end
+        if ent:GetIndex() == lp:GetIndex() then goto continue end
+
+        local is_team = (ent:GetTeamNumber() == lp:GetTeamNumber())
+
+        if is_team  and not show_team:GetValue()  then goto continue end
+        if not is_team and not show_enemy:GetValue() then goto continue end
+
+        local seq = ent:GetPropInt("m_nSequence") or 0
+
+        local origin = ent:GetAbsOrigin()
+        if not origin then goto continue end
+
+        local sx, sy = client.WorldToScreen(origin + Vector3(0, 0, 85))
+        if not sx or not sy then goto continue end
+
+        local r, g, b
+        if is_team then
+            r, g, b, _ = team_col:GetValue()
+        else
+            r, g, b, _ = enemy_col:GetValue()
+        end
+
+        local text = "seq=" .. seq
+        local tw, _ = draw.GetTextSize(text)
+        DrawOutlinedText(sx - tw/2, sy, text, r, g, b, 255)
+
+        ::continue::
+    end
+end)
+
+===== END: Sequence Reader =====
+
+===== FILE: Show Plugin Messages =====
+
+d be crash bcuz of trampoline idfk it worked for me basically it prints plugin messages in server to ur client so u can be able to see anti cheat triggers etc
+
+
+
+pcall(function() ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    int   VirtualProtect(void* lpAddress, size_t dwSize, uint32_t flNewProtect, uint32_t* lpflOldProtect);
+    void* VirtualAlloc(void* lpAddress, size_t dwSize, uint32_t flAllocationType, uint32_t flProtect);
+    void* memcpy(void* dst, const void* src, size_t n);
+]] end)
+
+local engineBase = ffi.cast("uintptr_t", ffi.C.GetModuleHandleA("engine.dll"))
+
+local GC = {}
+
+local function WriteHook(target, dest, size)
+    local old = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", target), size, 0x40, old)
+    local ptr = ffi.cast("uint8_t*", target)
+    ptr[0] = 0x68
+    ffi.cast("uint32_t*", ptr + 1)[0] = ffi.cast("uint32_t", dest)
+    ptr[5] = 0xC3
+    ffi.C.VirtualProtect(ffi.cast("void*", target), size, old[0], old)
+end
+
+local function RestoreBytes(target, trampoline, size)
+    local old = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", target), size, 0x40, old)
+    ffi.C.memcpy(ffi.cast("void*", target), trampoline, size)
+    ffi.C.VirtualProtect(ffi.cast("void*", target), size, old[0], old)
+end
+
+local function CreateTrampoline(src, size)
+    local t = ffi.C.VirtualAlloc(nil, 64, 0x3000, 0x40)
+    if t == nil then
+        print("[ERR] VirtualAlloc failed")
+        return nil
+    end
+    ffi.C.memcpy(t, ffi.cast("const void*", src), size)
+    local jmp = ffi.cast("uint8_t*", t) + size
+    jmp[0] = 0x68
+    ffi.cast("uint32_t*", jmp + 1)[0] = ffi.cast("uint32_t", src + size)
+    jmp[5] = 0xC3
+    return t
+end
+
+local PrintAddr = engineBase + 0x1D1B10
+local Print_t   = ffi.typeof("char(__fastcall*)(void*, void*)")
+
+local PrintTramp = CreateTrampoline(PrintAddr, 6)
+if not PrintTramp then return end
+GC.orig_print = ffi.cast(Print_t, PrintTramp)
+
+local function Hooked_Print(ecx, edx)
+    local ok, txt = pcall(function()
+        local p = ffi.cast("uintptr_t*", ffi.cast("uintptr_t", ecx) + 0x54)[0]
+        if p ~= 0 then return ffi.string(ffi.cast("const char*", p)) end
+        return nil
+    end)
+    if ok and txt then
+        local msg = txt:gsub("[\r\n]", "")
+        if #msg > 0 then
+            print(string.format("[SVC_Print] %s", msg))
+        end
+    end
+    return GC.orig_print(ecx, edx)
+end
+
+GC.hook_print = ffi.cast(Print_t, Hooked_Print)
+WriteHook(PrintAddr, ffi.cast("uintptr_t", GC.hook_print), 6)
+
+
+local UMsgAddr = engineBase + 0x1EC1D0
+local UMsg_t   = ffi.typeof("char(__fastcall*)(void*, void*)")
+
+local UMsgTramp = CreateTrampoline(UMsgAddr, 6)
+if not UMsgTramp then return end
+GC.orig_umsg = ffi.cast(UMsg_t, UMsgTramp)
+
+local UM_NAMES = {
+    [1]="Geiger",[2]="Train",[3]="HudText",[4]="SayText",[5]="SayText2",
+    [6]="TextMsg",[7]="HudMsg",[8]="ResetHUD",[9]="GameTitle",[10]="ItemPickup",
+    [11]="ShowMenu",[12]="Shake",[13]="Fade",[14]="VGUIMenu",[15]="Rumble",
+    [16]="CloseCaption",[17]="SendAudio",[18]="RawAudio",[19]="VoiceMask",
+    [20]="RequestState",[21]="BarTime",[22]="Damage",[23]="RadioText",
+    [24]="HintText",[25]="KeyHintText",[26]="ReloadEffect",[27]="PlayerAnimEvent",
+}
+
+local function Hooked_UMsg(ecx, edx)
+    local ok, typeid = pcall(function()
+        return ffi.cast("int32_t*", ffi.cast("uintptr_t", ecx) + 0x54)[0]
+    end)
+    if ok then
+        local name = UM_NAMES[typeid] or ("type_" .. tostring(typeid))
+        print(string.format("[SVC_UserMessage] type=%d (%s)", typeid, name))
+    end
+    return GC.orig_umsg(ecx, edx)
+end
+
+GC.hook_umsg = ffi.cast(UMsg_t, Hooked_UMsg)
+WriteHook(UMsgAddr, ffi.cast("uintptr_t", GC.hook_umsg), 6)
+
+
+local CVarAddr = engineBase + 0x15DC50
+local CVarFn_t = ffi.typeof("char(__fastcall*)(void*, void*)")
+
+local CVarTramp = CreateTrampoline(CVarAddr, 6)
+if not CVarTramp then return end
+GC.orig_cvar = ffi.cast(CVarFn_t, CVarTramp)
+
+local function Hooked_CVar(ecx, edx)
+    local ok, name, cookie = pcall(function()
+        local base    = ffi.cast("uintptr_t", ecx)
+        local nameptr = ffi.cast("uintptr_t*", base + 0x54)[0]
+        if nameptr ~= 0 then
+            return ffi.string(ffi.cast("const char*", nameptr)),
+                   ffi.cast("int32_t*", base + 0x58)[0]
+        end
+    end)
+    if ok and name then
+        print(string.format("[SVC_GetCvarValue] cvar='%s' cookie=%d", name, cookie))
+    end
+    return GC.orig_cvar(ecx, edx)
+end
+
+GC.hook_cvar = ffi.cast(CVarFn_t, Hooked_CVar)
+WriteHook(CVarAddr, ffi.cast("uintptr_t", GC.hook_cvar), 6)
+
+
+callbacks.Register("Unload", function()
+    if PrintTramp then RestoreBytes(PrintAddr, PrintTramp, 6) end
+    if UMsgTramp  then RestoreBytes(UMsgAddr,  UMsgTramp,  6) end
+    if CVarTramp  then RestoreBytes(CVarAddr,  CVarTramp,  6) end
+    print("[SVC Hooks] Kaldirildi")
+end)
+
+===== END: Show Plugin Messages =====
+
+===== FILE: Sound Data =====
+local ref = gui.Reference("Visuals", "World", "Extra")
+local opt_sound_show = gui.Checkbox(ref, "ffi.snd_show_mode", "Sound Data ESP", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat    = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_snd_show = SetupConVar("snd_show")
+
+if cv_snd_show then 
+    cv_snd_show.RemoveFlags(cv_snd_show.ptr, FCVAR_CHEAT) 
+end
+
+local last_state = -1
+
+callbacks.Register("CreateMove", "engine_snd_show_logic", function(cmd)
+    if not cv_snd_show then return end
+
+    local state = opt_sound_show:GetValue() and 1.0 or 0.0
+    
+    if state == last_state then return end
+    last_state = state
+
+    cv_snd_show.SetFloat(cv_snd_show.ptr, state)
+end)
+
+callbacks.Register("Unload", function()
+    if cv_snd_show then 
+        cv_snd_show.SetFloat(cv_snd_show.ptr, 0.0) 
+    end
+end)
+
+===== END: Sound Data =====

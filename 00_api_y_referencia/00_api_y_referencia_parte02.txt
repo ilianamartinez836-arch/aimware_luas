@@ -1,0 +1,440 @@
+
+===== FILE: Mdlstats =====
+local ref = gui.Reference("Visuals", "World", "Extra")
+local opt_overlay_esp = gui.Checkbox(ref, "esp.engine.ffi_overlay", "Model Stats Overlay", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        -- ConVar VTable: SetFloat (13. indeks) ve RemoveFlags (4. indeks)
+        SetFloat    = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_overlay = SetupConVar("r_drawmodelstatsoverlay")
+
+if cv_overlay then 
+    cv_overlay.RemoveFlags(cv_overlay.ptr, FCVAR_CHEAT) 
+end
+
+local last_state = -1
+
+callbacks.Register("CreateMove", "engine_overlay_logic", function(cmd)
+    if not cv_overlay then return end
+
+    local state = opt_overlay_esp:GetValue() and 1.0 or 0.0
+    
+    if state == last_state then return end
+    last_state = state
+
+    cv_overlay.SetFloat(cv_overlay.ptr, state)
+end)
+
+callbacks.Register("Unload", function()
+    if cv_overlay then 
+        cv_overlay.SetFloat(cv_overlay.ptr, 0.0) 
+    end
+end)
+
+===== END: Mdlstats =====
+
+===== FILE: Netvar Dumper =====
+Getallclasses hook type shi 
+
+
+
+
+
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+
+    typedef struct RecvProp_s RecvProp;
+    typedef struct RecvTable_s RecvTable;
+
+    struct RecvTable_s {
+        RecvProp    *m_pProps;
+        int          m_nProps;
+        void        *m_pDecoder;
+        const char  *m_pNetTableName;
+        uint8_t      m_bInitialized;
+        uint8_t      m_bInMainList;
+    };
+
+    struct RecvProp_s {
+        const char  *m_pVarName;
+        int          m_RecvType;
+        int          m_Flags;
+        int          m_StringBufferSize;
+        uint8_t      m_bInsideArray;
+        char         _pad0[3];
+        const void  *m_pExtraData;
+        RecvProp    *m_pArrayProp;
+        void        *m_ArrayLengthProxy;
+        void        *m_ProxyFn;
+        void        *m_DataTableProxyFn;
+        RecvTable   *m_pDataTable;
+        int          m_Offset;
+        int          m_ElementStride;
+        int          m_nElements;
+        const char  *m_pParentArrayPropName;
+    };
+
+    typedef struct ClientClass_s ClientClass;
+    struct ClientClass_s {
+        void         *m_pCreateFn;
+        void         *m_pCreateEventFn;
+        const char   *m_pNetworkName;
+        RecvTable    *m_pRecvTable;
+        ClientClass  *m_pNext;
+        int           m_ClassID;
+    };
+]]
+
+local function GetInterface(dll, name)
+    local mod = ffi.C.GetModuleHandleA(dll)
+    if mod == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)",
+        ffi.C.GetProcAddress(mod, "CreateInterface"))
+    return ci(name, nil)
+end
+
+local baseClient = nil
+for _, v in ipairs({"VClient017", "VClient016", "VClient015"}) do
+    local ptr = GetInterface("client.dll", v)
+    if ptr and ffi.cast("uintptr_t", ptr) ~= 0 then
+        baseClient = ptr
+        print("[NetVarDump] Interface: " .. v)
+        break
+    end
+end
+if not baseClient then print("[NetVarDump] baseClient alinamadi") return end
+
+
+local vtable = ffi.cast("uintptr_t**", baseClient)[0]
+local fnGetAllClasses = ffi.cast("ClientClass*(__thiscall*)(void*)", vtable[7])
+
+local ok, pHead = pcall(fnGetAllClasses, baseClient)
+if not ok or pHead == nil then
+    print("[NetVarDump] GetAllClasses basarisiz: " .. tostring(pHead))
+    return
+end
+
+
+local MAX_CLASSES = 2000
+local MAX_PROPS_PER_TABLE = 500
+local MAX_RECURSE_DEPTH = 6
+
+
+local function WalkTable(pTable, prefix, depth, outLines)
+    if pTable == nil or depth > MAX_RECURSE_DEPTH then return end
+
+    local nProps = pTable.m_nProps
+    if nProps <= 0 or nProps > MAX_PROPS_PER_TABLE then return end
+
+    for i = 0, nProps - 1 do
+        local prop = pTable.m_pProps[i]
+        if prop.m_pVarName ~= nil then
+            local name = ffi.string(prop.m_pVarName)
+
+            if prop.m_pDataTable ~= nil and name ~= "baseclass" then
+           
+                WalkTable(prop.m_pDataTable, prefix .. name .. ".", depth + 1, outLines)
+            elseif name:sub(1, 2) == "m_" then
+                table.insert(outLines, string.format("    %-40s offset=%-5d flags=%d",
+                    prefix .. name, prop.m_Offset, prop.m_Flags))
+            end
+        end
+    end
+end
+
+
+local pCur = pHead
+local nCount = 0
+local allLines = {}
+
+while pCur ~= nil and nCount < MAX_CLASSES do
+    local className = pCur.m_pNetworkName ~= nil and ffi.string(pCur.m_pNetworkName) or "?"
+    local pTable = pCur.m_pRecvTable
+
+    if pTable ~= nil then
+        local lines = {}
+        WalkTable(pTable, "", 0, lines)
+
+        if #lines > 0 then
+            table.insert(allLines, string.format("[%s]  (ClassID=%d)", className, pCur.m_ClassID))
+            for _, l in ipairs(lines) do
+                table.insert(allLines, l)
+            end
+        end
+    end
+
+    pCur = pCur.m_pNext
+    nCount = nCount + 1
+end
+
+print(string.format("[NetVarDump] %d class tarandi, dokum asagida:", nCount))
+for _, l in ipairs(allLines) do
+    print(l)
+end
+
+function FindNetVarOffset(wantedClass, wantedProp)
+    local pC = pHead
+    local n = 0
+    while pC ~= nil and n < MAX_CLASSES do
+        local cname = pC.m_pNetworkName ~= nil and ffi.string(pC.m_pNetworkName) or ""
+        if cname == wantedClass or cname == ("DT_" .. wantedClass) then
+            local result = nil
+            local function Search(pTable, depth)
+                if pTable == nil or depth > MAX_RECURSE_DEPTH or result then return end
+                for i = 0, pTable.m_nProps - 1 do
+                    local prop = pTable.m_pProps[i]
+                    if prop.m_pVarName ~= nil then
+                        local pname = ffi.string(prop.m_pVarName)
+                        if pname == wantedProp then
+                            result = prop.m_Offset
+                            return
+                        elseif prop.m_pDataTable ~= nil then
+                            Search(prop.m_pDataTable, depth + 1)
+                        end
+                    end
+                end
+            end
+            Search(pC.m_pRecvTable, 0)
+            if result then return result end
+        end
+        pC = pC.m_pNext
+        n = n + 1
+    end
+    return nil
+end
+
+-- some xamples 
+
+local teamOff = FindNetVarOffset("DT_BaseEntity", "m_iTeamNum")
+local lifeOff  = FindNetVarOffset("DT_BasePlayer", "m_lifeState")
+print(string.format("[NetVarDump] m_iTeamNum=%s  m_lifeState=%s",
+    tostring(teamOff), tostring(lifeOff)))
+
+===== END: Netvar Dumper =====
+
+===== FILE: Offical API List =====
+I wont share all API also metadata is secret so learn 1 by 1 from my luas but there is offical apilist for v5/5.1
+
+
+-- Aimware L4D2 Lua API + FFI Browser
+
+-- =====================
+-- API DATABASE
+-- =====================
+
+local API_DB = {
+
+    -- =====================
+    -- mem
+    -- =====================
+    "mem.Alloc",
+    "mem.Free",
+    "mem.GetModuleBase",
+    "mem.GetModuleSection",
+    "mem.FindPattern",
+
+    -- =====================
+    -- input
+    -- =====================
+    "input.GetMousePos",
+    "input.IsButtonDown",
+    "input.IsButtonPressed",
+    "input.IsButtonReleased",
+    "input.GetMouseWheelDelta",
+    "input.Keylist",
+
+    -- =====================
+    -- callbacks
+    -- =====================
+    "callbacks.Register",
+    "callbacks.Unregister",
+
+    -- =====================
+    -- common
+    -- =====================
+    "common.Time",
+    "common.DecodePNG",
+    "common.DecodeJPEG",
+    "common.RasterizeSVG",
+
+    -- =====================
+    -- draw
+    -- =====================
+    "draw.AddFontResource",
+    "draw.Color",
+    "draw.CreateFont",
+    "draw.CreateTexture",
+    "draw.FilledCircle",
+    "draw.FilledRect",
+    "draw.Fontlist",
+    "draw.GetScreenSize",
+    "draw.GetTextSize",
+    "draw.Line",
+    "draw.OutlinedCircle",
+    "draw.OutlinedRect",
+    "draw.RoundedRect",
+    "draw.RoundedRectFill",
+    "draw.SetFont",
+    "draw.SetScissorRect",
+    "draw.SetTexture",
+    "draw.ShadowRect",
+    "draw.Text",
+    "draw.TextShadow",
+    "draw.Triangle",
+    "draw.UpdateTexture",
+
+    -- =====================
+    -- file
+    -- =====================
+    "file.Open",
+    "file.Delete",
+    "file.Enumerate",
+    "file.Read",
+    "file.Write",
+
+    -- =====================
+    -- gui
+    -- =====================
+    "gui.Button",
+    "gui.Checkbox",
+    "gui.ColorPicker",
+    "gui.Combobox",
+    "gui.Command",
+    "gui.Custom",
+    "gui.Editbox",
+    "gui.Groupbox",
+    "gui.Keybox",
+    "gui.Listbox",
+    "gui.Multibox",
+    "gui.Reference",
+    "gui.Slider",
+    "gui.Tab",
+    "gui.Text",
+    "gui.Window",
+    "gui.XML",
+
+    -- =====================
+    -- http
+    -- =====================
+    "http.Get",
+
+    -- =====================
+    -- network
+    -- =====================
+    "network.Socket",
+    "network.GetAddrInfo",
+    "network.GetNameInfo",
+
+    -- =====================
+    -- vector
+    -- =====================
+    "vector",
+
+    -- =====================
+    -- ffi
+    -- =====================
+    "ffi",
+    "ffi.cdef",
+    "ffi.cast",
+    "ffi.new",
+    "ffi.typeof",
+    "ffi.sizeof",
+    "ffi.alignof",
+    "ffi.offsetof",
+    "ffi.istype",
+    "ffi.string",
+    "ffi.copy",
+    "ffi.fill",
+    "ffi.gc",
+    "ffi.metatype",
+    "ffi.errno",
+    "ffi.C",
+}
+
+ 
+local ref = gui.Reference("Misc", "Enhancements")
+local box = gui.Groupbox(ref, "L4D2 Lua API + FFI Browser", 16, 16, 360, 200)
+
+gui.Text(box, "Search API / Library / FFI:")
+local search_box = gui.Editbox(box, "api_browser_search", "")
+
+gui.Text(box, "Matching results:")
+
+local MAX_RESULTS = 20
+
+local function FindMatches(query)
+    local results = {}
+
+    if not query or query == "" then
+        return results
+    end
+
+    query = query:lower()
+
+    for _, api in ipairs(API_DB) do
+        if api:lower():find(query, 1, true) then
+            results[#results + 1] = api
+            if #results >= MAX_RESULTS then
+                break
+            end
+        end
+    end
+
+    return results
+end
+
+callbacks.Register("Draw", function()
+    local q = search_box:GetValue()
+    if q == "" then return end
+
+    local matches = FindMatches(q)
+    if #matches == 0 then return end
+
+    local x = 30
+    local y = 420
+    local line_h = 15
+
+    draw.Color(220, 220, 220, 255)
+
+    for i, api in ipairs(matches) do
+        draw.Text(x, y + (i - 1) * line_h, api)
+    end
+end)
+
+callbacks.Register("Unload", function()
+    -- stateless browser, safe unload
+end)
+
+===== END: Offical API List =====
