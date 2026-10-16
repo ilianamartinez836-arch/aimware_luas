@@ -1,0 +1,395 @@
+
+===== FILE: Newline Name =====
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local ref       = gui.Reference("Misc", "General", "Extra")
+local nl_enable = gui.Checkbox(ref, "nl.enable", "Newline Name", false)
+local nl_text   = gui.Editbox(ref, "nl.text", "MSG")
+local nl_count  = gui.Slider(ref, "nl.count", "Newlines", 2, 1, 30, 1)
+local nl_key    = gui.Keybox(ref, "nl.key", "Trigger Button", 0)
+
+local function GetInterface(dll, name)
+    local hMod = ffi.C.GetModuleHandleA(dll)
+    if hMod == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(hMod, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local pEngine = GetInterface("engine.dll", "VEngineClient014")
+if pEngine == nil or ffi.cast("uintptr_t", pEngine) == 0 then
+    pEngine = GetInterface("engine.dll", "VEngineClient013")
+end
+if pEngine == nil or ffi.cast("uintptr_t", pEngine) == 0 then
+    print("[NewlineSpam] IVEngineClient bulunamadi!")
+    return
+end
+print(string.format("[NewlineSpam] IVEngineClient: 0x%X", tonumber(ffi.cast("uintptr_t", pEngine))))
+
+local ClientCmd_t = ffi.typeof("void(__fastcall*)(void*, void*, const char*)")
+
+local function ClientCmd(cmdStr)
+    local vtbl = ffi.cast("void***", pEngine)[0]
+    ffi.cast(ClientCmd_t, vtbl[7])(pEngine, nil, cmdStr)
+end
+
+local function BuildNewlineMessage(text, count)
+    local newline = string.rep("\r", count)
+    local parts = {}
+    for i = 1, #text do
+        parts[#parts + 1] = text:sub(i, i)
+    end
+    return newline .. table.concat(parts, newline)
+end
+
+local last_message = nil
+
+callbacks.Register("CreateMove", "NewlineSpam_CM", function(cmd)
+    if not nl_enable:GetValue() then return end
+
+    local key = nl_key:GetValue()
+    if key ~= 0 and not input.IsButtonDown(key) then return end
+
+    local lp = entities.GetLocalPlayer()
+    if lp == nil then return end
+
+    local text = nl_text:GetValue()
+    if text == nil or text == "" then return end
+
+    local count = nl_count:GetValue()
+    local message = BuildNewlineMessage(text, count)
+
+    if message ~= last_message then
+        local ok, err = pcall(function()
+            ClientCmd('setinfo name "' .. message .. '"')
+        end)
+        if ok then
+            last_message = message
+        else
+            print("[NewlineSpam] hata: " .. tostring(err))
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("CreateMove", "NewlineSpam_CM")
+    print("[NewlineSpam] Kaldirildi.")
+end)
+
+
+===== END: Newline Name =====
+
+===== FILE: Say =====
+--cl_say hook
+
+local ref        = gui.Reference("Misc", "General", "Extra")
+local msg_enable = gui.Checkbox(ref, "msg.enable", "mesajtest", false)
+local msg_text   = gui.Editbox(ref, "msg.text", "mesaj")
+local msg_button = gui.Button(ref, "msg.send", "mesajgonder", function()
+end)
+
+pcall(function()
+    ffi.cdef[[
+        void* GetModuleHandleA(const char* lpModuleName);
+        void* GetProcAddress(void* hModule, const char* lpProcName);
+    ]]
+end)
+
+local clsay_addr = mem.FindPattern(
+    "engine.dll",
+    "55 8B EC 83 EC ?? 53 56 57 8B F9 8B 4D"
+)
+
+if not clsay_addr then
+    print("[Say] CL_Say null")
+    return
+end
+print(string.format("[Say] CL_Say: 0x%X", tonumber(ffi.cast("uintptr_t", clsay_addr))))
+
+local CL_Say_t = ffi.typeof("void(__thiscall*)(void*, const char*, bool)")
+local fn_say = ffi.cast(CL_Say_t, clsay_addr)
+
+local function SendMessage(text, team_only)
+    if text == nil or text == "" then return end
+    pcall(function()
+        fn_say(nil, text, team_only or false)
+    end)
+end
+
+local send_queued = false
+
+gui.Button(ref, "msg.send2", "Mesaj Gonder", function()
+    send_queued = true
+end)
+
+local last_send = 0
+local INTERVAL  = 30 
+
+callbacks.Register("Draw", "Say_Draw", function()
+    if send_queued then
+        send_queued = false
+        local text = msg_text:GetValue()
+        SendMessage(text, false)
+        print("[Say] Gonderildi: " .. tostring(text))
+    end
+    if msg_enable:GetValue() then
+        local now = globals.RealTime()
+        if now - last_send >= INTERVAL then
+            last_send = now
+            local text = msg_text:GetValue()
+            SendMessage(text, false)
+        end
+    end
+end)
+
+_G.L4D2_Say = function(text, team_only)
+    SendMessage(text, team_only)
+end
+
+callbacks.Register("Unload", "Say_Unload", function()
+    callbacks.Unregister("Draw", "Say_Draw")
+    _G.L4D2_Say = nil
+    print("[Say] Kaldirildi.")
+end)
+print("[Say] Yuklendi!")
+
+===== END: Say =====
+
+===== FILE: Spotify =====
+credits to aika 
+
+
+local ref = gui.Reference("Visuals", "Other")
+local box = gui.Groupbox(ref, "Spotify", 325, 315, 300, 0)
+local enable   = gui.Checkbox(box, "spotify.enable", "Enable",    true)
+local keyPrev  = gui.Keybox(box, "spotify.prev",    "Prev Key",  0)
+local keyNext  = gui.Keybox(box, "spotify.next",    "Next Key",  0)
+local keyPause = gui.Keybox(box, "spotify.pause",   "Pause Key", 0)
+
+local font = draw.CreateFont("Segoe UI", 14, 700)
+local songText    = "Spotify acik degil"
+local lastCheck   = 0
+local lastKeys    = {prev=false, next=false, pause=false}
+local spotifyHwnd = nil 
+
+pcall(function()
+    ffi.cdef[[
+        void* FindWindowExA(void* parent, void* child, const char* cls, const char* title);
+        void* FindWindowA(const char* cls, const char* title);
+        int   GetWindowTextA(void* hwnd, char* buf, int max);
+        bool  IsWindowVisible(void* hwnd);
+        bool  IsWindow(void* hwnd);
+        long  SendMessageA(void* hwnd, unsigned int msg, unsigned int wp, long lp);
+    ]]
+end)
+
+local WM_APPCOMMAND               = 0x319
+local APPCOMMAND_MEDIA_NEXTTRACK  = 0xB0000
+local APPCOMMAND_MEDIA_PREVTRACK  = 0xC0000
+local APPCOMMAND_MEDIA_PLAY_PAUSE = 0xE0000
+
+local BLACKLIST = {
+    "Google Chrome", "Chrome", "Firefox", "Edge",
+    "Claude", "Visual Studio", "Notepad", "Explorer",
+    "GitHub", "YouTube", "Twitch", "Discord",
+}
+
+local function isBlacklisted(title)
+    for _, b in ipairs(BLACKLIST) do
+        if title:find(b, 1, true) then return true end
+    end
+    return false
+end
+
+local function FindSpotifyHwnd()
+    local ok, result = pcall(function()
+        local u = ffi.load("user32")
+        local buf = ffi.new("char[512]")
+
+        local hwnd = u.FindWindowA("Chrome_WidgetWin_1", nil)
+        if hwnd ~= nil then return hwnd end
+
+        hwnd = u.FindWindowExA(nil, nil, "Chrome_WidgetWin_1", nil)
+        while hwnd ~= nil do
+            if u.IsWindowVisible(hwnd) then
+                local len = u.GetWindowTextA(hwnd, buf, 512)
+                if len > 0 then
+                    local title = ffi.string(buf)
+                    if not isBlacklisted(title) then
+                        return hwnd
+                    end
+                end
+            end
+            hwnd = u.FindWindowExA(nil, hwnd, "Chrome_WidgetWin_1", nil)
+        end
+        return nil
+    end)
+    if ok then return result end
+    return nil
+end
+
+local function isHwndValid(hwnd)
+    if not hwnd then return false end
+    local ok, result = pcall(function()
+        return ffi.load("user32").IsWindow(hwnd)
+    end)
+    return ok and result
+end
+
+local function GetTitle(hwnd)
+    if not hwnd then return nil end
+    local ok, result = pcall(function()
+        local buf = ffi.new("char[512]")
+        local len = ffi.load("user32").GetWindowTextA(hwnd, buf, 512)
+        if len <= 0 then return nil end
+        return ffi.string(buf)
+    end)
+    if ok then return result end
+    return nil
+end
+
+local function SendCommand(cmd)
+    if not isHwndValid(spotifyHwnd) then
+        spotifyHwnd = FindSpotifyHwnd()
+    end
+    if not spotifyHwnd then return end
+    pcall(function()
+        ffi.load("user32").SendMessageA(spotifyHwnd, WM_APPCOMMAND, 0, cmd)
+    end)
+end
+
+local function ParseTitle(title)
+    if not title then return nil, nil end
+    local sep = title:find(" %- ")
+    if sep then
+        local artist = title:sub(1, sep - 1):match("^%s*(.-)%s*$")
+        local song   = title:sub(sep + 3):match("^%s*(.-)%s*$")
+        return artist, song
+    end
+    return nil, nil
+end
+
+callbacks.Register("Draw", "spotify", function()
+    if not enable:GetValue() then return end
+
+    local now = common.Time()
+
+    local function checkKey(keyRef, stateKey, cmd)
+        local k = keyRef:GetValue()
+        if k == 0 then return end
+        local pressed = input.IsButtonDown(k)
+        if pressed and not lastKeys[stateKey] then
+            SendCommand(cmd)
+            lastCheck = 0
+        end
+        lastKeys[stateKey] = pressed
+    end
+
+    checkKey(keyPrev,  "prev",  APPCOMMAND_MEDIA_PREVTRACK)
+    checkKey(keyNext,  "next",  APPCOMMAND_MEDIA_NEXTTRACK)
+    checkKey(keyPause, "pause", APPCOMMAND_MEDIA_PLAY_PAUSE)
+
+    if now - lastCheck > 2 then
+        lastCheck = now
+
+        if not isHwndValid(spotifyHwnd) then
+            spotifyHwnd = FindSpotifyHwnd()
+        end
+
+        if spotifyHwnd then
+            local title = GetTitle(spotifyHwnd)
+            if title and title ~= "" then
+                local artist, song = ParseTitle(title)
+                if artist and song then
+                    -- Çalıyor
+                    songText = string.format("%s - %s", artist, song)
+                else
+                    -- Durdurulmuş (title var ama " - " yok)
+                    songText = "|| Durduruldu"
+                end
+            else
+                songText = "|| Durduruldu"
+            end
+        else
+            songText = "Spotify acik degil"
+        end
+    end
+
+    local sw, _ = draw.GetScreenSize()
+    draw.SetFont(font)
+    local tw, th = draw.GetTextSize(songText)
+
+    draw.Color(0, 0, 0, 160)
+    draw.FilledRect(sw/2 - tw/2 - 6, 4, sw/2 + tw/2 + 6, 4 + th + 6)
+
+    draw.Color(30, 215, 96, 255)
+    draw.FilledRect(sw/2 - tw/2 - 4, 10, sw/2 - tw/2 + 4, 18)
+
+    draw.Color(0, 0, 0, 255)
+    draw.Text(sw/2 - tw/2 + 7, 7, songText)
+    draw.Color(255, 255, 255, 255)
+    draw.Text(sw/2 - tw/2 + 6, 6, songText)
+end)
+
+===== END: Spotify =====
+
+===== FILE: Translator =====
+pub vers. basic translate with translator apis
+
+
+-- TRANSLATOR  by murayefeskamus
+local ref = gui.Reference("Misc")
+local tab = gui.Tab(ref, "translator.tab", "Translator")
+
+local box = gui.Groupbox(tab, "Translate & Send", 10, 10, 300, 180)
+
+local input = gui.Editbox(box, "translator.text", "")
+local lang  = gui.Combobox(box, "translator.lang", "Language", "Turkce", "Rusca", "Ispanyolca")
+
+local team_only = gui.Checkbox(box, "translator.team", "Team Chat Only", false)
+
+local function URLEncode(str)
+    str = str:gsub("([^%w%-%.%_%~ ])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    return str:gsub(" ", "+")
+end
+
+gui.Button(box, "Send", function()
+
+    local text = input:GetValue()
+    if text == "" then return end
+
+    local lang_map = {
+        [0] = "tr",
+        [1] = "ru",
+        [2] = "es"
+    }
+
+    local target = lang_map[lang:GetValue()] or "tr"
+
+    local url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" .. target .. "&dt=t&q=" .. URLEncode(text)
+
+    http.Get(url, function(res)
+        if not res then return end
+
+        local translated = res:match('%[%["([^"]+)"')
+        if not translated then return end
+
+        print("[TRANSLATED] " .. translated)
+
+        if team_only:GetValue() then
+            client.ChatTeamSay(translated)
+        else
+            client.ChatSay(translated)
+        end
+    end)
+
+end)
+
+===== END: Translator =====

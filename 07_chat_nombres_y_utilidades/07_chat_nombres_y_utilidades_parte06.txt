@@ -1,0 +1,348 @@
+
+===== FILE: Jukebox =====
+Idk...
+
+example map is: tumtara
+used lua: idx finder
+
+
+
+local font = draw.CreateFont("Tahoma", 13, 700)
+
+local JUKEBOX_IDX = 524
+
+local function DrawOutlinedText(x, y, r, g, b, text)
+    draw.SetFont(font)
+    draw.Color(0, 0, 0, 255)
+    draw.Text(x-1, y-1, text)
+    draw.Text(x+1, y-1, text)
+    draw.Text(x-1, y+1, text)
+    draw.Text(x+1, y+1, text)
+    draw.Color(r, g, b, 255)
+    draw.Text(x, y, text)
+end
+
+callbacks.Register("Draw", "jukebox_esp", function()
+    local lp = entities.GetLocalPlayer()
+    local mypos = lp and lp:GetAbsOrigin()
+
+    local ents = entities.FindByClass("CDynamicProp")
+    if not ents then return end
+
+    for _, ent in pairs(ents) do
+        if not ent:IsDormant() then
+            local ok, idx = pcall(function()
+                return ent:GetPropInt("m_nModelIndex")
+            end)
+            if ok and idx == JUKEBOX_IDX then
+                local origin = ent:GetAbsOrigin()
+                if origin then
+                    local sx, sy = client.WorldToScreen(
+                        Vector3(origin.x, origin.y, origin.z + 40))
+                    if sx then
+                        local dist = 0
+                        if mypos then
+                            local dx = origin.x - mypos.x
+                            local dy = origin.y - mypos.y
+                            local dz = origin.z - mypos.z
+                            dist = math.floor(math.sqrt(dx*dx + dy*dy + dz*dz))
+                        end
+                        DrawOutlinedText(sx, sy, 255, 0, 255, 
+                            string.format("JUKEBOX [%dm]", math.floor(dist/52)))
+                    end
+                end
+            end
+        end
+    end
+end)
+
+===== END: Jukebox =====
+
+===== FILE: Killsay =====
+--Killsay shi
+
+local ref = gui.Reference("Misc")
+local tab = gui.Tab(ref, "killsay.tab", "Killsay")
+local box = gui.Groupbox(tab, "Killsay", 16, 16, 400, 0)
+
+local enable   = gui.Checkbox(box, "ks.enable",   "Enable Killsay",       false)
+local team_say = gui.Checkbox(box, "ks.teamsay",  "Team Chat (say_team)", false)
+local cooldown = gui.Slider(box,   "ks.cooldown", "Cooldown (sn)",        3, 0, 30)
+
+gui.Text(box, " ")
+gui.Text(box, "-- Msg List --")
+gui.Text(box, " ")
+
+local msg_boxes = {}
+local defaults  = { "1", "owned", "get rekt", "bb", "soktu", "skill diff", "xd", "ez" }
+
+for i = 1, 8 do
+    local eb = gui.Editbox(box, "ks.msg" .. i, "Mesaj " .. i)
+    eb:SetValue(defaults[i])
+    table.insert(msg_boxes, eb)
+end
+
+gui.Text(box, " ")
+gui.Text(box, "Bos birakilan mesajlar listeden cikar.")
+
+local lastKillTime = 0
+local my_userID    = nil
+
+client.AllowListener("player_death")
+
+local function GetMyUserID()
+    local me = entities.GetLocalPlayer()
+    if not me then return nil end
+    local info = client.GetPlayerInfo(me:GetIndex())
+    if not info then return nil end
+    return info.userID
+end
+
+local function GetMessages()
+    local list = {}
+    for _, eb in ipairs(msg_boxes) do
+        local val = eb:GetValue()
+        if val and val ~= "" then
+            table.insert(list, val)
+        end
+    end
+    return list
+end
+
+local function IsSpecialInfected(ent)
+    if not ent then return false end
+    local zclass = ent:GetPropInt("m_zombieClass") or 0
+    return zclass >= 1 and zclass ~= 7
+end
+
+callbacks.Register("FireGameEvent", "killsay_event", function(event)
+    if not enable:GetValue() then return end
+    if event:GetName() ~= "player_death" then return end
+
+    local attackerID = event:GetInt("attacker")
+    local victimID   = event:GetInt("userid")
+    if attackerID == 0 then return end
+    if attackerID == victimID then return end
+
+    if not my_userID then
+        my_userID = GetMyUserID()
+    end
+    if not my_userID then return end
+    if attackerID ~= my_userID then return end
+
+    local victimIdx = client.GetPlayerIndexByUserID(victimID)
+    local victim    = entities.GetByIndex(victimIdx)
+
+    local now = globals.RealTime()
+    if now - lastKillTime < cooldown:GetValue() then return end
+    lastKillTime = now
+
+    local msgs = GetMessages()
+    if #msgs == 0 then return end
+
+    math.randomseed(globals.TickCount())
+    local chosen = msgs[math.random(1, #msgs)]
+
+    if team_say:GetValue() then
+        client.ChatTeamSay(chosen)
+    else
+        client.ChatSay(chosen)
+    end
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("FireGameEvent", "killsay_event")
+    my_userID = nil
+end)
+
+===== END: Killsay =====
+
+===== FILE: Map Automation =====
+This is "LevelInitPreEntity" hook I recommend using this. Bcuz thats engine Level Automatic Getmapname (in engine func or whatever) an xample hook i mean if u wanna turn on something automaticly in each map u can 
+use this hook 
+
+
+
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+    int   VirtualProtect(void* lpAddress, size_t dwSize, unsigned long flNewProtect, unsigned long* lpflOldProtect);
+]]
+
+local function GetInterface(dll, name)
+    local mod = ffi.C.GetModuleHandleA(dll)
+    if mod == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)",
+        ffi.C.GetProcAddress(mod, "CreateInterface"))
+    return ci(name, nil)
+end
+
+local baseClient = nil
+for _, v in ipairs({"VClient017", "VClient016", "VClient015"}) do
+    local ptr = GetInterface("client.dll", v)
+    if ptr and ffi.cast("uintptr_t", ptr) ~= 0 then
+        baseClient = ptr
+        print("[MapHook] Interface: " .. v)
+        break
+    end
+end
+if not baseClient then print("[MapHook] baseClient alinamadi") return end
+
+local vtable = ffi.cast("uintptr_t**", baseClient)[0]
+
+local SLOT_LEVELINIT = 4
+
+local SLOT_HUDTEXT = 12
+
+local LevelInit_t = ffi.typeof("void(__thiscall*)(void*, const char*)")
+local HudText_t   = ffi.typeof("void(__thiscall*)(void*, const char*)")
+
+local pOrigLevelInit = ffi.cast(LevelInit_t, vtable[SLOT_LEVELINIT])
+local fnHudText       = ffi.cast(HudText_t, vtable[SLOT_HUDTEXT])
+
+
+local FRAME_DELAY = 90   
+
+local nPendingFrames = -1
+
+local function HookedLevelInit(this, pMapName)
+    
+    pOrigLevelInit(this, pMapName)
+
+    if pMapName == nil then return end
+    local mapname = ffi.string(pMapName)
+    print("[MapHook] Harita yukleniyor: " .. mapname)
+
+ 
+    if mapname:find("c2m1") then
+        print("[MapHook] c2m1 tespit edildi, X gecikmeli gosterilecek")
+        nPendingFrames = FRAME_DELAY
+    end
+end
+
+local cHookedLevelInit = ffi.cast(LevelInit_t, HookedLevelInit)
+local pSlot = ffi.cast("uintptr_t*", vtable + SLOT_LEVELINIT)
+local oldProtect = ffi.new("uint32_t[1]")
+
+ffi.C.VirtualProtect(pSlot, ffi.sizeof("uintptr_t"), 0x40, oldProtect)
+pSlot[0] = ffi.cast("uintptr_t", cHookedLevelInit)
+ffi.C.VirtualProtect(pSlot, ffi.sizeof("uintptr_t"), oldProtect[0], oldProtect)
+
+print("[MapHook] LevelInitPreEntity hook kuruldu")
+
+
+callbacks.Register("Draw", "maphook_tick", function()
+    if nPendingFrames < 0 then return end
+
+    nPendingFrames = nPendingFrames - 1
+    if nPendingFrames == 0 then
+        pcall(fnHudText, baseClient, "X")
+        print("[MapHook] X gosterildi")
+        nPendingFrames = -1
+    end
+end)
+
+callbacks.Register("Unload", function()
+    ffi.C.VirtualProtect(pSlot, ffi.sizeof("uintptr_t"), 0x40, oldProtect)
+    pSlot[0] = ffi.cast("uintptr_t", pOrigLevelInit)
+    ffi.C.VirtualProtect(pSlot, ffi.sizeof("uintptr_t"), oldProtect[0], oldProtect)
+    callbacks.Unregister("Draw", "maphook_tick")
+    print("[MapHook] Hook kaldirildi")
+end)
+
+===== END: Map Automation =====
+
+===== FILE: Newline Chat =====
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local ref       = gui.Reference("Misc", "General", "Extra")
+local nl_enable = gui.Checkbox(ref, "nlc.enable", "Newline Chat", false)
+local nl_text   = gui.Editbox(ref, "nlc.text", "MSG")
+local nl_count  = gui.Slider(ref, "nlc.count", "Newlines", 2, 1, 30, 1)
+local nl_team   = gui.Checkbox(ref, "nlc.team", "TEam", false)
+local nl_key    = gui.Keybox(ref, "nlc.key", "Trigger", 0)
+local nl_once   = gui.Checkbox(ref, "nlc.once", "Always On", true)
+
+local function GetInterface(dll, name)
+    local hMod = ffi.C.GetModuleHandleA(dll)
+    if hMod == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(hMod, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local pEngine = GetInterface("engine.dll", "VEngineClient014")
+if pEngine == nil or ffi.cast("uintptr_t", pEngine) == 0 then
+    pEngine = GetInterface("engine.dll", "VEngineClient013")
+end
+if pEngine == nil or ffi.cast("uintptr_t", pEngine) == 0 then
+    print("[NewlineChat] IVEngineClient bulunamadi!")
+    return
+end
+print(string.format("[NewlineChat] IVEngineClient: 0x%X", tonumber(ffi.cast("uintptr_t", pEngine))))
+
+local ClientCmd_t = ffi.typeof("void(__fastcall*)(void*, void*, const char*)")
+
+local function ClientCmd(cmdStr)
+    local vtbl = ffi.cast("void***", pEngine)[0]
+    ffi.cast(ClientCmd_t, vtbl[7])(pEngine, nil, cmdStr)
+end
+
+local function BuildNewlineMessage(text, count)
+    local newline = string.rep("\r", count)
+    local parts = {}
+    for i = 1, #text do
+        parts[#parts + 1] = text:sub(i, i)
+    end
+    return newline .. table.concat(parts, newline)
+end
+
+local was_down = false
+
+local function SendChatMessage()
+    local text = nl_text:GetValue()
+    if text == nil or text == "" then return end
+
+    local count = nl_count:GetValue()
+    local message = BuildNewlineMessage(text, count)
+    local cmd = nl_team:GetValue() and "say_team" or "say"
+
+    local ok, err = pcall(function()
+        ClientCmd(cmd .. ' "' .. message .. '"')
+    end)
+    if not ok then
+        print("[NewlineChat] hata: " .. tostring(err))
+    end
+end
+
+callbacks.Register("CreateMove", "NewlineChat_CM", function(cmd)
+    if not nl_enable:GetValue() then return end
+
+    local key = nl_key:GetValue()
+    local is_down = (key ~= 0) and input.IsButtonDown(key)
+
+    if nl_once:GetValue() then
+        if is_down and not was_down then
+            SendChatMessage()
+        end
+        was_down = is_down
+    else
+        if key == 0 or is_down then
+            SendChatMessage()
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("CreateMove", "NewlineChat_CM")
+    print("[NewlineChat] Kaldirildi.")
+end)
+
+
+===== END: Newline Chat =====
