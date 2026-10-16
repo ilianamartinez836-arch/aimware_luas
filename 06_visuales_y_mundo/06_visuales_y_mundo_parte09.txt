@@ -1,0 +1,337 @@
+
+===== FILE: No Post Process =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local remove_postprocess = gui.Checkbox(ref, "misc.removals.no_postprocess", "Disable Post Process", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_postprocess = SetupConVar("mat_postprocess_enable")
+if cv_postprocess then cv_postprocess.RemoveFlags(cv_postprocess.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "mat_postprocess_logic", function(cmd)
+    local enabled = remove_postprocess:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_postprocess then cv_postprocess.SetFloat(cv_postprocess.ptr, 0.0) end 
+    else
+        if cv_postprocess then cv_postprocess.SetFloat(cv_postprocess.ptr, 1.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_postprocess then cv_postprocess.SetFloat(cv_postprocess.ptr, 1.0) end
+end)
+
+===== END: No Post Process =====
+
+===== FILE: No Shadows and Flashlight =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local noshadows_enable = gui.Checkbox(ref, "misc.visuals.disable_shadows_single", "Disable Dynamic Shadows and Flashlight", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_shadows = SetupConVar("r_shadows")
+if cv_shadows then cv_shadows.RemoveFlags(cv_shadows.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "r_shadows_logic", function(cmd)
+    local enabled = noshadows_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_shadows then cv_shadows.SetFloat(cv_shadows.ptr, 0.0) end 
+    else
+        if cv_shadows then cv_shadows.SetFloat(cv_shadows.ptr, 1.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_shadows then cv_shadows.SetFloat(cv_shadows.ptr, 1.0) end
+end)
+
+===== END: No Shadows and Flashlight =====
+
+===== FILE: No Shellcase =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local nobrass_enable = gui.Checkbox(ref, "misc.visuals.disable_brass", "Remove Shell case", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_brass = SetupConVar("cl_ejectbrass")
+if cv_brass then cv_brass.RemoveFlags(cv_brass.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "cl_brass_logic", function(cmd)
+    local enabled = nobrass_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_brass then cv_brass.SetFloat(cv_brass.ptr, 0.0) end 
+    else
+        if cv_brass then cv_brass.SetFloat(cv_brass.ptr, 1.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_brass then cv_brass.SetFloat(cv_brass.ptr, 1.0) end
+end)
+
+===== END: No Shellcase =====
+
+===== FILE: No Skybox =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local nosky_enable = gui.Checkbox(ref, "misc.nosky.enable", "No Skybox (Black Sky)", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_skybox = SetupConVar("r_skybox")
+if cv_skybox then cv_skybox.RemoveFlags(cv_skybox.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "nosky_logic", function(cmd)
+    local enabled = nosky_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_skybox then cv_skybox.SetFloat(cv_skybox.ptr, 0.0) end 
+    else
+        if cv_skybox then cv_skybox.SetFloat(cv_skybox.ptr, 1.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_skybox then cv_skybox.SetFloat(cv_skybox.ptr, 1.0) end
+end)
+
+===== END: No Skybox =====
+
+===== FILE: No Sniper Scope Overlay and Paint Overlay =====
+idk lemme searh for whole paint but ill share it already bcuz i found no scope shit thats why
+
+
+
+
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    int   VirtualProtect(void* lpAddress, size_t dwSize, uint32_t flNewProtect, uint32_t* lpflOldProtect);
+]]
+
+local ref        = gui.Reference("Misc", "General", "Extra")
+local sc_enable  = gui.Checkbox(ref, "sc.enable",  "Disable Scope Overlay (uncheck checkbox ROFL)",         true)
+local sc_color_e = gui.Checkbox(ref, "sc.colen",   "Paint", false)
+local sc_color   = gui.ColorPicker(ref, "sc.color", "Color",         255, 0, 0, 255)
+
+local client_module = ffi.cast("uintptr_t", ffi.C.GetModuleHandleA("client.dll"))
+if client_module == 0 then print("[Scope] client.dll none") return end
+print(string.format("[Scope] client.dll: 0x%X", tonumber(client_module)))
+
+
+local pSurface = ffi.cast("void***", client_module + 0x88B8F4)[0]
+if pSurface == nil or ffi.cast("uintptr_t", pSurface) == 0 then
+    print("[Scope] ISurface alinamadi!")
+    return
+end
+print(string.format("[Scope] ISurface: 0x%X", tonumber(ffi.cast("uintptr_t", pSurface))))
+
+local surf_vtbl = ffi.cast("void***", pSurface)[0]
+
+local SetColor_t = ffi.typeof("void*(__fastcall*)(void*, void*, int, int, int, int)")
+local PaintFn_t  = ffi.typeof("void*(__fastcall*)(void*, void*)")
+
+local GC = {
+    hk_setcolor = nil,
+    hk_paint    = nil,
+}
+
+local orig_setcolor_ptr = surf_vtbl[11]
+local orig_setcolor     = ffi.cast(SetColor_t, orig_setcolor_ptr)
+
+local scope_paint_entry = ffi.cast("void**", client_module + 0x5A39E4)
+local orig_paint        = ffi.cast(PaintFn_t, scope_paint_entry[0])
+
+print(string.format("[Scope] Paint orig: 0x%X", tonumber(ffi.cast("uintptr_t", orig_paint))))
+
+local in_scope_paint = false
+
+GC.hk_setcolor = ffi.cast(SetColor_t, function(this, dummy, r, g, b, a)
+    if in_scope_paint and sc_color_e:GetValue() then
+        local cr, cg, cb = sc_color:GetValue()
+        return orig_setcolor(this, nil, cr, cg, cb, a)
+    end
+    return orig_setcolor(this, nil, r, g, b, a)
+end)
+
+GC.hk_paint = ffi.cast(PaintFn_t, function(this, dummy)
+    if not sc_enable:GetValue() then
+        return nil  
+    end
+    in_scope_paint = true
+    local result = orig_paint(this, nil)
+    in_scope_paint = false
+    return result
+end)
+
+
+local old = ffi.new("uint32_t[1]")
+ffi.C.VirtualProtect(ffi.cast("void*", surf_vtbl + 11 * 4), 4, 0x40, old)
+surf_vtbl[11] = ffi.cast("void*", GC.hk_setcolor)
+ffi.C.VirtualProtect(ffi.cast("void*", surf_vtbl + 11 * 4), 4, old[0], old)
+
+local old2 = ffi.new("uint32_t[1]")
+ffi.C.VirtualProtect(ffi.cast("void*", scope_paint_entry), 4, 0x40, old2)
+scope_paint_entry[0] = ffi.cast("void*", GC.hk_paint)
+ffi.C.VirtualProtect(ffi.cast("void*", scope_paint_entry), 4, old2[0], old2)
+
+print("[Scope] DrawSetColor hook kuruldu (slot 11).")
+print("[Scope] Paint hook kuruldu (slot 128, RVA 0x5A39E4).")
+
+callbacks.Register("Unload", function()
+    local r1 = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", surf_vtbl + 11 * 4), 4, 0x40, r1)
+    surf_vtbl[11] = orig_setcolor_ptr
+    ffi.C.VirtualProtect(ffi.cast("void*", surf_vtbl + 11 * 4), 4, r1[0], r1)
+
+    local r2 = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", scope_paint_entry), 4, 0x40, r2)
+    scope_paint_entry[0] = ffi.cast("void*", orig_paint)
+    ffi.C.VirtualProtect(ffi.cast("void*", scope_paint_entry), 4, r2[0], r2)
+
+    print("[Scope] Hook'lar kaldirildi.")
+end)
+
+===== END: No Sniper Scope Overlay and Paint Overlay =====

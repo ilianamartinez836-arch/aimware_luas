@@ -1,0 +1,336 @@
+
+===== FILE: No Water Reflection =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local clear_water_enable = gui.Checkbox(ref, "misc.visuals.clear_water_single", "Remove Water Reflection", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_water = SetupConVar("r_waterforceexpensive")
+if cv_water then cv_water.RemoveFlags(cv_water.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "r_water_logic", function(cmd)
+    local enabled = clear_water_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_water then cv_water.SetFloat(cv_water.ptr, 0.0) end 
+    else
+        if cv_water then cv_water.SetFloat(cv_water.ptr, 1.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_water then cv_water.SetFloat(cv_water.ptr, 1.0) end
+end)
+
+===== END: No Water Reflection =====
+
+===== FILE: No Weapon =====
+local ref = gui.Reference("Misc", "General", "Extra")
+
+local alternative_nobob = gui.Checkbox(ref, "misc.visuals.alt_nobob", "wont workthat shi use bottom", false)
+local hide_weapon       = gui.Checkbox(ref, "misc.visuals.hide_viewmodel", "Invisible Weapon aka nowep", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_shift_l   = SetupConVar("cl_viewmodel_shift_left_amt")
+local cv_shift_r   = SetupConVar("cl_viewmodel_shift_right_amt")
+local cv_sway_scale = SetupConVar("cl_wpn_sway_scale")
+local cv_draw_vmodel = SetupConVar("r_drawviewmodel")
+
+local target_cvars = {cv_shift_l, cv_shift_r, cv_sway_scale, cv_draw_vmodel}
+for i = 1, #target_cvars do
+    if target_cvars[i] then target_cvars[i].RemoveFlags(target_cvars[i].ptr, FCVAR_CHEAT) end
+end
+
+local last_bob_state = false
+local last_hide_state = false
+
+callbacks.Register("CreateMove", "deep_sway_logic", function(cmd)
+    local bob_enabled = alternative_nobob:GetValue()
+    local hide_enabled = hide_weapon:GetValue()
+    
+    if bob_enabled ~= last_bob_state then
+        last_bob_state = bob_enabled
+        if bob_enabled then
+            if cv_shift_l    then cv_shift_l.SetFloat(cv_shift_l.ptr, 0.0) end
+            if cv_shift_r    then cv_shift_r.SetFloat(cv_shift_r.ptr, 0.0) end
+            if cv_sway_scale then cv_sway_scale.SetFloat(cv_sway_scale.ptr, 0.0) end
+        else
+            if cv_shift_l    then cv_shift_l.SetFloat(cv_shift_l.ptr, 0.5) end 
+            if cv_shift_r    then cv_shift_r.SetFloat(cv_shift_r.ptr, 0.25) end
+            if cv_sway_scale then cv_sway_scale.SetFloat(cv_sway_scale.ptr, 1.0) end
+        end
+    end
+
+    if hide_enabled ~= last_hide_state then
+        last_hide_state = hide_enabled
+        if cv_draw_vmodel then
+            cv_draw_vmodel.SetFloat(cv_draw_vmodel.ptr, hide_enabled and 0.0 or 1.0)
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_shift_l    then cv_shift_l.SetFloat(cv_shift_l.ptr, 0.5) end
+    if cv_shift_r    then cv_shift_r.SetFloat(cv_shift_r.ptr, 0.25) end
+    if cv_sway_scale then cv_sway_scale.SetFloat(cv_sway_scale.ptr, 1.0) end
+    if cv_draw_vmodel then cv_draw_vmodel.SetFloat(cv_draw_vmodel.ptr, 1.0) end
+end)
+
+===== END: No Weapon =====
+
+===== FILE: Player Lights =====
+L4D2 Dynamic Light (ELight)
+ g_pEffects: void** cast, [0] = IEffects*
+ dlight_t.key = +36 
+ AllocELight: __thiscall 
+
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    typedef struct {
+        int     flags;
+        float   origin_x;
+        float   origin_y;
+        float   origin_z;
+        float   radius;
+        uint8_t color_r;
+        uint8_t color_g;
+        uint8_t color_b;
+        int8_t  exponent;
+        float   die;
+        float   decay;
+        float   minlight;
+        int     key;
+        int     style;
+    } dlight_t;
+]]
+
+local ref       = gui.Reference("Misc", "General", "Extra")
+local pl_enable = gui.Checkbox(ref,    "dl.pl_en",  "Player DLight Aktif",  false)
+local pl_color  = gui.ColorPicker(ref, "dl.pl_col", "Player Isik Rengi",    0,   200, 255, 255)
+local pl_radius = gui.Slider(ref,      "dl.pl_rad", "Player Yaricap",        150, 50, 500, 1)
+local wp_enable = gui.Checkbox(ref,    "dl.wp_en",  "Weapon DLight Aktif",  false)
+local wp_color  = gui.ColorPicker(ref, "dl.wp_col", "Weapon Isik Rengi",    255, 100, 0,   255)
+local wp_radius = gui.Slider(ref,      "dl.wp_rad", "Weapon Yaricap",        80,  20, 300, 1)
+
+local client_module = ffi.cast("uintptr_t", ffi.C.GetModuleHandleA("client.dll"))
+if client_module == 0 then print("[DLight] client.dll bulunamadi") return end
+print(string.format("[DLight] client.dll: 0x%X", tonumber(client_module)))
+
+-- dword_10735E44 = IEffects*
+local g_pEffects = ffi.cast("void**", client_module + 0x735E44)
+
+
+local AllocELight_t = ffi.typeof("dlight_t*(__fastcall*)(void*, void*, int)")
+
+local function AllocELight(key)
+    local pThis = g_pEffects[0]
+    if pThis == nil or ffi.cast("uintptr_t", pThis) < 0x10000 then return nil end
+    local vtbl = ffi.cast("void***", pThis)[0]
+    return ffi.cast(AllocELight_t, vtbl[5])(pThis, nil, key)
+end
+
+local KEY_PLAYER = 0x10000000
+local KEY_WEAPON = 0x20000000
+
+local function isValid(p)
+    if p == nil then return false end
+    return ffi.cast("uintptr_t", p) > 0x10000
+end
+
+callbacks.Register("Draw", "DLight_Draw", function()
+    local ok, err = pcall(function()
+        local lp = entities.GetLocalPlayer()
+        if not lp then return end
+
+        if pl_enable:GetValue() then
+            local players = entities.FindByClass("CTerrorPlayer")
+            if players then
+                for _, ent in ipairs(players) do
+                    if ent and ent:IsAlive() then
+                        local idx = ent:GetIndex()
+                        local dl  = AllocELight(idx + KEY_PLAYER)
+                        if isValid(dl) then
+                            local pos = ent:GetAbsOrigin()
+                            local r, g, b = pl_color:GetValue()
+                            dl.flags    = 0
+                            dl.origin_x = pos.x
+                            dl.origin_y = pos.y
+                            dl.origin_z = pos.z + 40
+                            dl.radius   = pl_radius:GetValue()
+                            dl.color_r  = r
+                            dl.color_g  = g
+                            dl.color_b  = b
+                            dl.exponent = 0
+                            dl.die      = globals.RealTime() + 0.05
+                            dl.decay    = 0.0
+                            dl.minlight = 0.0
+                            dl.key      = idx + KEY_PLAYER
+                            dl.style    = 0
+                        end
+                    end
+                end
+            end
+        end
+
+        if wp_enable:GetValue() then
+            local weapon = lp:GetPropEntity("m_hActiveWeapon")
+            if weapon then
+                local idx = weapon:GetIndex()
+                local dl  = AllocELight(idx + KEY_WEAPON)
+                if isValid(dl) then
+                    local pos = lp:GetAbsOrigin()
+                    local r, g, b = wp_color:GetValue()
+                    dl.flags    = 0
+                    dl.origin_x = pos.x
+                    dl.origin_y = pos.y
+                    dl.origin_z = pos.z + 20
+                    dl.radius   = wp_radius:GetValue()
+                    dl.color_r  = r
+                    dl.color_g  = g
+                    dl.color_b  = b
+                    dl.exponent = 0
+                    dl.die      = globals.RealTime() + 0.05
+                    dl.decay    = 0.0
+                    dl.minlight = 0.0
+                    dl.key      = idx + KEY_WEAPON
+                    dl.style    = 0
+                end
+            end
+        end
+    end)
+    if not ok then print("[DLight] hata: " .. tostring(err)) end
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("Draw", "DLight_Draw")
+    print("[DLight] Kaldirildi.")
+end)
+
+===== END: Player Lights =====
+
+===== FILE: Simple Shadows =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local remove_all_shadows = gui.Checkbox(ref, "misc.visuals.max_shadows_single", "Simple Shadows", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_maxshadows = SetupConVar("r_shadowmaxrendered")
+if cv_maxshadows then cv_maxshadows.RemoveFlags(cv_maxshadows.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "r_maxshadows_logic", function(cmd)
+    local enabled = remove_all_shadows:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_maxshadows then cv_maxshadows.SetFloat(cv_maxshadows.ptr, 0.0) end 
+    else
+        if cv_maxshadows then cv_maxshadows.SetFloat(cv_maxshadows.ptr, 32.0) end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_maxshadows then cv_maxshadows.SetFloat(cv_maxshadows.ptr, 32.0) end
+end)
+
+===== END: Simple Shadows =====

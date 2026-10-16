@@ -1,0 +1,328 @@
+
+===== FILE: Neon Engine Skeletons =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local skeleton_draw = gui.Checkbox(ref, "misc.visuals.skeleton_draw", "Enable Neon Skeletons", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_skel = SetupConVar("enable_skeleton_draw")
+if cv_skel then cv_skel.RemoveFlags(cv_skel.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "skeleton_draw_logic", function(cmd)
+    local enabled = skeleton_draw:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_skel then cv_skel.SetFloat(cv_skel.ptr, 1.0) end 
+    else
+        if cv_skel then cv_skel.SetFloat(cv_skel.ptr, 0.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_skel then cv_skel.SetFloat(cv_skel.ptr, 0.0) end
+end)
+
+===== END: Neon Engine Skeletons =====
+
+===== FILE: Neon Mipmaps =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local miplevels_enable = gui.Checkbox(ref, "misc.visuals.mat_showmiplevels", "Neon Mipmaps", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_miplevels = SetupConVar("mat_showmiplevels")
+if cv_miplevels then cv_miplevels.RemoveFlags(cv_miplevels.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "mat_miplevels_logic", function(cmd)
+    local enabled = miplevels_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_miplevels then cv_miplevels.SetFloat(cv_miplevels.ptr, 1.0) end 
+    else
+        if cv_miplevels then cv_miplevels.SetFloat(cv_miplevels.ptr, 0.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_miplevels then cv_miplevels.SetFloat(cv_miplevels.ptr, 0.0) end
+end)
+
+===== END: Neon Mipmaps =====
+
+===== FILE: No Ambient Noise =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local norefresh_enable = gui.Checkbox(ref, "misc.visuals.no_refresh_single", "Remove Ambient Noise", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_norefresh = SetupConVar("r_norefresh")
+if cv_norefresh then cv_norefresh.RemoveFlags(cv_norefresh.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "r_norefresh_logic", function(cmd)
+    local enabled = norefresh_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_norefresh then cv_norefresh.SetFloat(cv_norefresh.ptr, 1.0) end 
+    else
+        if cv_norefresh then cv_norefresh.SetFloat(cv_norefresh.ptr, 0.0) end 
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_norefresh then cv_norefresh.SetFloat(cv_norefresh.ptr, 0.0) end
+end)
+
+===== END: No Ambient Noise =====
+
+===== FILE: No Chat =====
+no chudchat
+
+
+local ref = gui.Reference("Misc", "General", "Extra")
+
+local no_chat_enable = gui.Checkbox(ref, "misc.visuals.no_chat", "No Chat", false)
+local no_hands_enable = gui.Checkbox(ref, "misc.visuals.no_hands", "No Hands (doesnt dork)", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_chat_time   = SetupConVar("hud_saytext_time")
+local cv_vmodel_fov  = SetupConVar("viewmodel_fov")
+
+if cv_chat_time then cv_chat_time.RemoveFlags(cv_chat_time.ptr, FCVAR_CHEAT) end
+if cv_vmodel_fov then cv_vmodel_fov.RemoveFlags(cv_vmodel_fov.ptr, FCVAR_CHEAT) end
+
+local last_chat_state = false
+local last_hands_state = false
+
+callbacks.Register("CreateMove", "chat_and_hands_logic", function(cmd)
+    local chat_enabled  = no_chat_enable:GetValue()
+    local hands_enabled = no_hands_enable:GetValue()
+
+    if chat_enabled ~= last_chat_state then
+        last_chat_state = chat_enabled
+        if cv_chat_time then
+            cv_chat_time.SetFloat(cv_chat_time.ptr, chat_enabled and 0.0 or 12.0)
+        end
+    end
+
+    if hands_enabled ~= last_hands_state then
+        last_hands_state = hands_enabled
+        if cv_vmodel_fov then
+            cv_vmodel_fov.SetFloat(cv_vmodel_fov.ptr, hands_enabled and -10.0 or 51.0)
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_chat_time then cv_chat_time.SetFloat(cv_chat_time.ptr, 12.0) end
+    if cv_vmodel_fov then cv_vmodel_fov.SetFloat(cv_vmodel_fov.ptr, 51.0) end
+end)
+
+===== END: No Chat =====
+
+===== FILE: No Color Correction =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local kill_color_systems = gui.Checkbox(ref, "misc.visuals.kill_color_systems", "No Color Corrections", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_cc             = SetupConVar("mat_colorcorrection")
+local cv_cc_entities    = SetupConVar("mat_colcorrection_disableentities")
+local cv_cc_clientside  = SetupConVar("mat_colcorrection_forceentitiesclientside")
+
+local cvars = {cv_cc, cv_cc_entities, cv_cc_clientside}
+for i = 1, #cvars do
+    if cvars[i] then cvars[i].RemoveFlags(cvars[i].ptr, FCVAR_CHEAT) end
+end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "mega_color_kill_logic", function(cmd)
+    local enabled = kill_color_systems:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_cc            then cv_cc.SetFloat(cv_cc.ptr, 0.0) end
+        if cv_cc_entities   then cv_cc_entities.SetFloat(cv_cc_entities.ptr, 1.0) end
+        if cv_cc_clientside then cv_cc_clientside.SetFloat(cv_cc_clientside.ptr, 0.0) end
+    else
+        if cv_cc            then cv_cc.SetFloat(cv_cc.ptr, 1.0) end
+        if cv_cc_entities   then cv_cc_entities.SetFloat(cv_cc_entities.ptr, 0.0) end
+        if cv_cc_clientside then cv_cc_clientside.SetFloat(cv_cc_clientside.ptr, 1.0) end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_cc            then cv_cc.SetFloat(cv_cc.ptr, 1.0) end
+    if cv_cc_entities   then cv_cc_entities.SetFloat(cv_cc_entities.ptr, 0.0) end
+    if cv_cc_clientside then cv_cc_clientside.SetFloat(cv_cc_clientside.ptr, 1.0) end
+end)
+
+===== END: No Color Correction =====
