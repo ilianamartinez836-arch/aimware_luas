@@ -1,0 +1,440 @@
+
+===== FILE: Aimbot Toggler =====
+Minimal Version cuz keybinds are big n idk :/
+
+
+-- Minimal Aimbot Toggle Display System by Murayefeskamus 
+
+local visualsRef = gui.Reference("Visuals", "Other")
+local displayGroup = gui.Groupbox(visualsRef, "Minimal Display", 325, 315, 300, 0)
+
+local enableMaster = gui.Checkbox(displayGroup, "enable_main", "Enable", true)
+local toggleKey = gui.Keybox(displayGroup, "toggle_key", "Toggle Key", 0)
+
+local font = draw.CreateFont("Segoe UI", 18, 700)  -- 14 → 18, 600 → 700
+
+local displayEnabled = true
+local lastKeyState = false
+
+local function handleToggle()
+    local key = toggleKey:GetValue()
+    if key == 0 then return end
+
+    local pressed = input.IsButtonDown(key)
+
+    if pressed and not lastKeyState then
+        displayEnabled = not displayEnabled
+    end
+
+    lastKeyState = pressed
+end
+
+local function getAimbotStatus()
+    local enabled =
+        (gui.GetValue("rbot.master") and gui.GetValue("rbot.enable")) or
+        (gui.GetValue("lbot.master") and gui.GetValue("lbot.aim.enable"))
+    
+    return enabled and "ON" or "OFF"
+end
+
+callbacks.Register("Draw", function()
+    if not enableMaster:GetValue() then return end
+
+    handleToggle()
+    if not displayEnabled then return end
+
+    draw.SetFont(font)
+    
+    local status = getAimbotStatus()
+    
+    if status == "ON" then
+        draw.Color(0, 255, 0, 255) 
+    else
+        draw.Color(255, 0, 0, 255)  
+    end
+    
+    draw.Text(10, 10, status)
+end)
+
+===== END: Aimbot Toggler =====
+
+===== FILE: Auto Ceil Aimbot =====
+local ref    = gui.Reference("Aimbot", "General")
+local group  = gui.Groupbox(ref, "Auto Ceiling", 16, 16, 220, 0)
+
+local enable = gui.Checkbox(group, "ceil.enable", "Enable", false)
+local keybox = gui.Keybox(group,   "ceil.key",    "Key",    6)
+local mode   = gui.Combobox(group, "ceil.mode",   "Mode",   "Hold", "Toggle")
+
+local LOCKED_PITCH = 12.09
+local toggled      = false
+local prev_down    = false
+
+callbacks.Register("CreateMove", function(cmd)
+    if not cmd then return end
+    if not enable:GetValue() then toggled = false; return end
+
+    local key  = keybox:GetValue()
+    local down = input.IsButtonDown(key)
+    local m    = mode:GetValue()
+
+    local active = false
+    if m == 0 then
+        active = down
+    else
+        if down and not prev_down then toggled = not toggled end
+        active = toggled
+    end
+    prev_down = down
+
+    if not active then return end
+
+    cmd.viewangles.x = LOCKED_PITCH
+    local ang = engine.GetViewAngles()
+    ang.x = LOCKED_PITCH
+    engine.SetViewAngles(ang)
+end)
+
+callbacks.Register("Unload", function()
+    toggled = false
+end)
+
+===== END: Auto Ceil Aimbot =====
+
+===== FILE: Auto Pistol =====
+basic autopistol for ragebotting in hvh instead of legitbot 
+
+
+
+
+
+
+local PISTOLS = {
+    ["CWeaponPistol"] = true,
+    ["CWeaponMagnum"] = true,
+}
+
+local function IsPistol(cls)
+    if cls == nil then return false end
+    if PISTOLS[cls] then return true end
+    if string.find(cls, "Pistol") or string.find(cls, "Magnum") then return true end
+    return false
+end
+
+local function GetActiveWeapon(ply)
+    local ok, wep = pcall(function() return ply:GetPropEntity("m_hActiveWeapon") end)
+    if ok and wep ~= nil then return wep end
+
+    local ok2, h = pcall(function() return ply:GetProp("m_hActiveWeapon") end)
+    if ok2 and type(h) == "number" and h ~= 0 and h ~= -1 then
+        return entities.GetByIndex(h % 2048)
+    end
+    return nil
+end
+
+local toggle_state = false
+
+callbacks.Register("CreateMove", "l4d2_max_autopistol", function(cmd)
+    if not cmd then return end
+
+    if not input.IsButtonDown(1) then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+
+    local wep = GetActiveWeapon(me)
+    if not wep then return end
+
+    local cls = wep:GetClass()
+    if not IsPistol(cls) then return end
+
+    toggle_state = not toggle_state
+
+    if toggle_state then
+        cmd.buttons = bit.bor(cmd.buttons, 1)  
+    else
+        cmd.buttons = bit.band(cmd.buttons, bit.bnot(1)) 
+    end
+end)
+
+===== END: Auto Pistol =====
+
+===== FILE: Auto Shotgun Shove =====
+T1 only 
+
+
+local ref      = gui.Reference("Misc", "General", "Extra")
+local shoveBox = gui.Checkbox(ref, "shotgunshove.enabled", "Shotgun Shove", false)
+
+local IN_ATTACK  = 1
+local IN_ATTACK2 = 2048
+
+local wasAttacking = false
+local shoveNext    = false
+
+local SHOTGUNS = {
+    ["Shotgun Chrome"] = true,
+    ["Pumpshotgun"]   = true,
+}
+
+callbacks.Register("CreateMove", "shotgunshove", function(cmd)
+    if not shoveBox:GetValue() then return end
+
+    local pLocal = entities.GetLocalPlayer()
+    if not pLocal or not pLocal:IsAlive() then
+        wasAttacking = false
+        shoveNext    = false
+        return
+    end
+
+    local weapon = pLocal:GetPropEntity("m_hActiveWeapon")
+    if not weapon or not SHOTGUNS[weapon:GetName()] then
+        wasAttacking = false
+        shoveNext    = false
+        return
+    end
+
+    local buttons   = cmd:GetButtons()
+    local attacking = bit.band(buttons, IN_ATTACK) ~= 0
+
+    if shoveNext then
+        cmd:SetButtons(bit.bor(buttons, IN_ATTACK2))
+        shoveNext = false
+    end
+
+    if attacking and not wasAttacking then
+        shoveNext = true
+    end
+
+    wasAttacking = attacking
+end)
+
+callbacks.Register("Unload", function()
+    callbacks.Unregister("CreateMove", "shotgunshove")
+end)
+
+===== END: Auto Shotgun Shove =====
+
+===== FILE: Auto Sniper =====
+hold m1 shit for legitbot 
+
+
+
+local SNIPERS = {
+    ["CSniperRifle"]    = true,   
+    ["CSniperMilitary"] = true,   
+    ["CAWP"]            = true,   
+    ["CScout"]          = true,   
+}
+
+
+local function IsSniper(cls)
+    if cls == nil then return false end
+    if SNIPERS[cls] then return true end
+    if string.find(cls, "Sniper") then return true end
+    if string.find(cls, "AWP")    then return true end
+    if string.find(cls, "Scout")  then return true end
+    return false
+end
+
+
+local ref = gui.Reference("Misc")
+local box = gui.Groupbox(ref, "Auto Sniper", 16, 16, 260, 0)
+local chk  = gui.Checkbox(box, "as.en",   "Aktif", true)
+local rate = gui.Slider  (box, "as.rate", "Refire orani (tick)", 1, 1, 6)
+local dbg  = gui.Checkbox(box, "as.dbg",  "Debug log", false)
+
+local tick = 0
+
+
+local function GetActiveWeapon(ply)
+    local ok, wep = pcall(function()
+        return ply:GetPropEntity("m_hActiveWeapon")
+    end)
+    if ok and wep ~= nil then return wep end
+
+  
+    local ok2, h = pcall(function()
+        return ply:GetProp("m_hActiveWeapon")
+    end)
+    if ok2 and type(h) == "number" and h ~= 0 and h ~= -1 then
+        return entities.GetByIndex(h % 2048)
+    end
+    return nil
+end
+
+local function GetClassSafe(ent)
+    if ent == nil then return nil end
+    local ok, cls = pcall(function()
+        local c = ent:GetClass()
+        return c
+    end)
+    if not ok then return nil end
+    return cls
+end
+
+callbacks.Register("CreateMove", "autosniper_v6", function(cmd)
+    if not cmd then return end
+    if not chk:GetValue() then return end
+
+   
+    if not input.IsButtonDown(1) then
+        tick = 0
+        return
+    end
+
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+
+    local wep = GetActiveWeapon(me)
+    if not wep then return end
+
+    local cls = GetClassSafe(wep)
+    if not IsSniper(cls) then return end
+
+  
+    local step = rate:GetValue()
+    tick = tick + 1
+
+    local before = cmd.buttons or 0
+    local after
+    if tick % (step * 2) < step then
+        after = bit.bor(before, 1)                 
+    else
+        after = bit.band(before, bit.bnot(1))      
+    end
+
+    cmd.buttons = after
+
+   
+    if dbg:GetValue() and tick == 1 then
+        print("[AutoSniper] class=" .. tostring(cls) ..
+              " before=" .. tostring(before) ..
+              " after="  .. tostring(after) ..
+              " cmd.buttons_ok=" .. tostring(cmd.buttons == after))
+    end
+end)
+
+===== END: Auto Sniper =====
+
+===== FILE: Delay Ticks for Ragebot =====
+delayed ticks for rifles etc bcuz of less blantant cheating for server sided silent aimbot. Have fun 
+
+
+
+
+
+local DELAY_TICKS = 7
+local current_tick = 0
+local last_shot_tick = 0
+
+local function GetActiveWeapon(ply)
+    local ok, wep = pcall(function() return ply:GetPropEntity("m_hActiveWeapon") end)
+    if ok and wep ~= nil then return wep end
+    
+    local ok2, h = pcall(function() return ply:GetProp("m_hActiveWeapon") end)
+    if ok2 and type(h) == "number" and h ~= 0 and h ~= -1 then
+        return entities.GetByIndex(h % 2048)
+    end
+    return nil
+end
+
+local function IsAK47(wep)
+    if not wep then return false end
+    
+    local ok_model, model = pcall(function() return wep:GetModel() or wep:GetPropString("m_ModelName") end)
+    if ok_model and type(model) == "string" then
+        if string.find(string.lower(model), "ak47") then
+            return true
+        end
+    end
+
+    local ok_cls, cls = pcall(function() return wep:GetClass() end)
+    if ok_cls and type(cls) == "string" then
+        if string.find(string.lower(cls), "ak47") then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function IsSupportedWeapon(wep)
+    if not wep then return false end
+    
+    if IsAK47(wep) then return false end
+
+    local ok, cls = pcall(function() return wep:GetClass() end)
+    if not ok or not cls then return false end
+    local lowerCls = string.lower(cls)
+  
+    if string.find(lowerCls, "pistol") or 
+       string.find(lowerCls, "magnum") or 
+       string.find(lowerCls, "submachinegun") or 
+       string.find(lowerCls, "smg") or 
+       string.find(lowerCls, "rifle") then
+        return true
+    end
+
+    return false
+end
+
+callbacks.Register("CreateMove", "l4d2_7tick_delay_no_ak", function(cmd)
+    if not cmd then return end
+
+    current_tick = current_tick + 1
+
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+
+    local wep = GetActiveWeapon(me)
+    if not wep then return end
+
+    if not IsSupportedWeapon(wep) then return end
+
+    local is_attacking = bit.band(cmd.buttons, 1) ~= 0
+
+    if is_attacking then
+        if (current_tick - last_shot_tick) < DELAY_TICKS then
+            cmd.buttons = bit.band(cmd.buttons, bit.bnot(1)) 
+        else
+            last_shot_tick = current_tick 
+        end
+    end
+end)
+
+===== END: Delay Ticks for Ragebot =====
+
+===== FILE: Doubletap =====
+Not minee another forum lua 
+
+
+
+local lastActivationTime = 0
+local doubleshot = false
+
+local enabledDT = gui.Checkbox(gui.Reference("Misc", "General", "Extra"), "autofire", "Double-Tap", 0)
+enabledDT:SetDescription("Does a \"Double Tap\" While your speedhack key is held.")
+
+local function onCreateMove(cmd)
+	if not gui.GetValue("misc.master") then return end
+	if not enabledDT:GetValue() then return end
+    local currentTime = globals.RealTime()
+    if input.IsButtonDown(gui.GetValue("misc.speedhack.key")) then
+        if not doubleshot then
+            cmd.buttons = bit.bor(cmd.buttons, 1)
+            lastActivationTime = currentTime
+            doubleshot = true
+        elseif doubleshot and currentTime - lastActivationTime < 0.32 then
+            cmd.buttons = bit.bor(cmd.buttons, 1)
+		elseif currentTime - lastActivationTime > 0.32 and currentTime - lastActivationTime < 1 then
+			cmd.buttons = bit.band(cmd.buttons, bit.bnot(1))
+		elseif currentTime - lastActivationTime > 1 then
+			doubleshot=false
+        end
+    end
+end
+
+callbacks.Register("CreateMove", "Speedhack", onCreateMove)
+
+===== END: Doubletap =====

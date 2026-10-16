@@ -1,0 +1,335 @@
+
+===== FILE: Haymaker =====
+local ref = gui.Reference("Visuals", "Other")
+local box = gui.Groupbox(ref, "Haymaker", 325, 315, 300, 0)
+local enable      = gui.Checkbox(box, "hay.enable", "Enable", false)
+local jump_enable = gui.Checkbox(box, "hay.jump", "Jump Haymaker", false)
+
+local IN_JUMP   = 2
+local jump_delay = 0.0001 
+local last_attack = 0
+
+callbacks.Register("CreateMove", "haymaker", function(cmd)
+    if not enable:GetValue() then return end
+    local lp = entities.GetLocalPlayer()
+    if not lp or not lp:IsAlive() then return end
+
+    local ok, zc = pcall(function() return lp:GetPropInt("m_zombieClass") end)
+    if not ok or zc ~= 8 then return end
+    if lp:GetTeamNumber() ~= 3 then return end
+
+    local buttons = cmd:GetButtons()
+    local now     = globals.RealTime()
+
+    if buttons % (524289 * 2) >= 524289 then
+        last_attack = now
+        cmd:SetButtons(buttons + 2048)
+    end
+
+    if jump_enable:GetValue() and last_attack > 0 and (now - last_attack) >= jump_delay then
+        local buttons2 = cmd:GetButtons()
+        cmd:SetButtons(buttons2 + IN_JUMP)
+        last_attack = 0
+    end
+end)
+
+===== END: Haymaker =====
+
+===== FILE: Hit Chance BHOP =====
+
+
+===== END: Hit Chance BHOP =====
+
+===== FILE: Infected Aimbot =====
+//jauyek
+
+
+
+
+
+local aim_tank_group = gui.Groupbox(gui.Reference("Misc", "General"), "Infected Aim", 15, 130, 296, 190)
+local enable_checkbox = gui.Checkbox(aim_tank_group, "lua_aim_tank_enable", "Enable", false)
+local keybind = gui.Keybox(aim_tank_group, 'lua_aim_tank_key', 'On Key', 1)
+
+local filter_multibox = gui.Multibox(aim_tank_group, "Filter")
+local bots_checkbox = gui.Checkbox(filter_multibox, "target_bots", "Bots", true)
+local players_checkbox = gui.Checkbox(filter_multibox, "target_players", "Players", true)
+
+local auto_hit_checkbox = gui.Checkbox(aim_tank_group, "lua_aim_tank_auto_hit", "Tank Auto Hit", false)
+local range_slider = gui.Slider(aim_tank_group, "lua_aim_tank_range", "Aim Range", 5000, 1, 10000)
+
+local function is_key_pressed(key)
+    return input.IsButtonDown(key)
+end
+
+local function is_survivor_valid(local_player, survivor)
+    local ignore_bots = not bots_checkbox:GetValue()
+    local ignore_players = not players_checkbox:GetValue()
+
+    if ignore_bots and survivor:GetClass() == "SurvivorBot" then
+        return false
+    end
+
+    if ignore_players and survivor:GetClass() ~= "SurvivorBot" then
+        return false
+    end
+
+    return survivor:IsPlayer() and survivor:IsAlive() and survivor:GetTeamNumber() ~= local_player:GetTeamNumber() and not survivor:GetPropBool("m_isIncapacitated")
+end
+
+local function is_valid_team(local_player)
+    return local_player:GetTeamNumber() == 3
+end
+
+local function find_closest_survivor()
+    local local_player = entities.GetLocalPlayer()
+    if not local_player or not local_player:IsAlive() or not is_valid_team(local_player) then
+        return nil
+    end
+
+    local survivors = entities.FindByClass("CCSPlayer")
+    local closest_survivor, closest_distance = nil, math.huge
+
+    for _, survivor in ipairs(survivors) do
+        if is_survivor_valid(local_player, survivor) then
+            local distance = (local_player:GetAbsOrigin() - survivor:GetAbsOrigin()):Length()
+            if distance < closest_distance then
+                closest_survivor = survivor
+                closest_distance = distance
+            end
+        end
+    end
+
+    return closest_survivor, closest_distance
+end
+
+local function clamp_angle(angle)
+    return math.max(-20, math.min(20, angle))
+end
+
+local function simulate_primary_attack(cmd)
+    cmd.buttons = bit.bor(cmd.buttons, 1)
+end
+
+local function force_aim(cmd)
+    local local_player = entities.GetLocalPlayer()
+    if not local_player then
+        return
+    end
+
+    local closest_survivor, closest_distance = find_closest_survivor()
+    if closest_survivor and closest_distance <= range_slider:GetValue() then
+        local local_pos = local_player:GetAbsOrigin()
+        local survivor_pos = closest_survivor:GetAbsOrigin()
+
+        local forward_vector = survivor_pos - local_pos
+        local angles = forward_vector:Angles()
+
+        angles.x = clamp_angle(angles.x)
+
+        engine.SetViewAngles(angles)
+
+        local maxHealth = local_player:GetMaxHealth()
+        if auto_hit_checkbox:GetValue() and closest_distance <= 165 and maxHealth >= 3000 then
+            simulate_primary_attack(cmd)
+        end
+    end
+end
+
+local function switch(cmd)
+    if enable_checkbox:GetValue() and is_key_pressed(keybind:GetValue()) then
+        force_aim(cmd)
+    end
+end
+
+callbacks.Register("CreateMove", "aim_tank_switch", switch)
+
+===== END: Infected Aimbot =====
+
+===== FILE: Legitbot FOV Circle =====
+-- Legitbot FOV Circle
+local CAMERA_FOV = 108
+local COMPENSATION = 1.02
+
+local ref = gui.Reference("Lua")
+
+local legit_fov = gui.Slider(
+    ref,
+    "lua_legit_fov_decimal",
+    "Visual Legit FOV",
+    5.0,
+    0.0,
+    30.0,
+    0.1
+)
+
+local thickness = gui.Slider(
+    ref,
+    "lua_fov_thickness",
+    "Circle Thickness",
+    1,
+    1,
+    4
+)
+
+local function FovToPixels(legit_fov_deg)
+    local w, h = draw.GetScreenSize()
+    local half_w = w / 2
+
+    local ratio = legit_fov_deg / CAMERA_FOV
+    local effective_fov = CAMERA_FOV * ratio
+
+    return math.tan(math.rad(effective_fov) / 2) * half_w * COMPENSATION
+end
+
+callbacks.Register("Draw", function()
+    local lp = entities.GetLocalPlayer()
+    if not lp or not lp:IsAlive() then return end
+
+    local fov = legit_fov:GetValue()
+    if fov <= 0 then return end
+
+    local radius = FovToPixels(fov)
+    if radius <= 1 then return end
+
+    local w, h = draw.GetScreenSize()
+    local cx, cy = w / 2, h / 2
+
+    draw.Color(255, 0, 0, 220)
+
+    local segments = 90
+    local step = (2 * math.pi) / segments
+
+    local px = cx + math.cos(0) * radius
+    local py = cy + math.sin(0) * radius
+
+    for i = 1, segments do
+        local a = step * i
+        local x = cx + math.cos(a) * radius
+        local y = cy + math.sin(a) * radius
+
+        for t = 0, thickness:GetValue() - 1 do
+            draw.Line(px, py + t, x, y + t)
+        end
+
+        px, py = x, y
+    end
+
+    local text = string.format("FOV: %.1f", fov)
+    local tw, th = draw.GetTextSize(text)
+
+    draw.Color(255, 255, 255, 230)
+    draw.Text(cx - tw / 2, cy + radius + 6, text)
+end)
+
+
+
+
+===== END: Legitbot FOV Circle =====
+
+===== FILE: M2 Aimbot Disabler =====
+legit eklenti çok takmayın obs için 
+
+-- L4D2 M2 Aimbot Disabler
+
+local wasM2Pressed = false
+local aimbotWasDisabledByScript = false
+
+local function isAimbotEnabled()
+    if not gui or not gui.GetValue then return false end
+    local rbotActive = (gui.GetValue("rbot.master") and gui.GetValue("rbot.enable"))
+    local lbotActive = (gui.GetValue("lbot.master") and gui.GetValue("lbot.aim.enable"))
+    return rbotActive or lbotActive
+end
+
+local function setAimbot(enable)
+    if not gui or not gui.SetValue then return end
+    if gui.GetValue("rbot.master") then gui.SetValue("rbot.enable", enable and 1 or 0) end
+    if gui.GetValue("lbot.master") then gui.SetValue("lbot.aim.enable", enable and 1 or 0) end
+end
+
+local function hasButton(buttons, flag)
+    return (buttons % (flag * 2)) >= flag
+end
+
+local ref = gui.Reference("MISC")
+local tab = gui.Tab(ref, "m2_disabler", "M2 Aimbot Disabler")
+local box = gui.Groupbox(tab, "M2 Aimbot Disabler", 16, 16, 296, 150)
+
+local menu = {
+    enable = gui.Checkbox(box, "m2d_enable", "Enable Script", true),
+}
+
+
+callbacks.Register("CreateMove", function(cmd)
+    -- Script GUI'den kapalıysa, hiçbir şey yapma ve aimbot'u eski haline getir.
+    if not menu.enable:GetValue() then
+        if aimbotWasDisabledByScript then
+            setAimbot(true)
+            aimbotWasDisabledByScript = false
+        end
+        return
+    end
+
+    local localPlayer = entities.GetLocalPlayer()
+    if not localPlayer or not localPlayer:IsAlive() then return end
+
+    local buttons = cmd:GetButtons()
+    local m2Pressed = hasButton(buttons, 2048)  -- IN_ATTACK2
+
+    if m2Pressed and not wasM2Pressed then
+        if isAimbotEnabled() then
+            setAimbot(false)
+            aimbotWasDisabledByScript = true
+        end
+    end
+
+    if not m2Pressed and wasM2Pressed then
+        if aimbotWasDisabledByScript then
+            setAimbot(true)
+            aimbotWasDisabledByScript = false
+        end
+    end
+
+    wasM2Pressed = m2Pressed
+end)
+
+callbacks.Register("Unload", function()
+    -- Script kapanırken aimbot'u biz kapattıysak, tekrar aç.
+    if aimbotWasDisabledByScript then
+        setAimbot(true)
+    end
+end)
+
+===== END: M2 Aimbot Disabler =====
+
+===== FILE: Max Speed Spinbot =====
+dude locked 180 degeree so its not like cs
+
+
+--Better Spin
+local ref = gui.Reference("Misc")
+local tab = gui.Tab(ref, "aa_tab", "Anti-Aim")
+local aa_box = gui.Groupbox(tab, "Spinbot", 16, 16, 300, 80)
+
+local aa_enabled = gui.Checkbox(aa_box, "aa.enable", "Enable Anti-Aim", false)
+local spin_speed = gui.Slider(aa_box, "aa.spinspeed", "Spin Hızı", 180, 1, 180)
+
+local current_yaw = 0
+
+callbacks.Register("CreateMove", "anti_aim_action", function(cmd)
+    local me = entities.GetLocalPlayer()
+    if not aa_enabled:GetValue() or not me or not me:IsAlive() then
+        return
+    end
+    current_yaw = (current_yaw + spin_speed:GetValue()) % 360
+    
+    local final_yaw = current_yaw
+    if final_yaw > 180 then final_yaw = final_yaw - 360 end
+
+    local anti_aim_angles = EulerAngles(0, final_yaw, 0)
+
+    cmd:SetViewAngles(anti_aim_angles)
+end)
+
+===== END: Max Speed Spinbot =====

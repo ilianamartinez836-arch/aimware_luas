@@ -1,0 +1,443 @@
+
+===== FILE: Reg Breaker and Other Stuff for Hunter =====
+Created by Rexion ape
+
+
+--Auto Clicker Auto Ceil and Reg/Hitbox breaker for hunter 
+local KEY_F = 0x46 
+local KEY_G = 0x47 
+local KEY_Q = 0x51 
+
+local MAX_PITCH_F = 8.0
+local MAX_PITCH_Q = 12.0
+local FIXED_PITCH_G = 41.75
+
+local next_attack_time = 0
+local IN_ATTACK = 1
+
+callbacks.Register("CreateMove", function(cmd)
+    local local_player = entities.GetLocalPlayer()
+    if not local_player or not local_player:IsAlive() then return end
+
+    local my_team = local_player:GetPropInt("m_iTeamNum")
+    if my_team ~= 3 then return end
+
+    local zombie_class = local_player:GetPropInt("m_zombieClass")
+    if zombie_class ~= 3 then return end
+
+    local current_time = globals.CurTime()
+    local active = false
+
+    if input.IsButtonDown(KEY_F) then
+        active = true
+        local va = engine.GetViewAngles()
+        if va.x > MAX_PITCH_F then
+            engine.SetViewAngles(EulerAngles(MAX_PITCH_F, va.y, va.z))
+        end
+
+    elseif input.IsButtonDown(KEY_Q) then
+        active = true
+        local va = engine.GetViewAngles()
+        if va.x > MAX_PITCH_Q then
+            engine.SetViewAngles(EulerAngles(MAX_PITCH_Q, va.y, va.z))
+        end
+
+    elseif input.IsButtonDown(KEY_G) then
+        active = true
+        local va = engine.GetViewAngles()
+        engine.SetViewAngles(EulerAngles(FIXED_PITCH_G, va.y, va.z))
+    end
+
+    if active then
+        if current_time >= next_attack_time then
+            cmd.buttons = bit.bor(cmd.buttons, IN_ATTACK)
+            local random_delay = math.random(40, 60) / 1000
+            next_attack_time = current_time + random_delay
+        else
+            cmd.buttons = bit.band(cmd.buttons, bit.bnot(IN_ATTACK))
+        end
+    end
+end)
+
+===== END: Reg Breaker and Other Stuff for Hunter =====
+
+===== FILE: Rock Predict =====
+--rock predict try 
+
+local font = draw.CreateFont("Tahoma", 12, 500)
+
+local GRAVITY = 15
+local STEP = 0.05
+local MAX_STEPS = 60
+
+local lockedVel = nil
+local lockedPos = nil
+local lockedTime = 0
+local LOCK_DURATION = 0.3
+
+
+local function GetRock()
+    local tank = nil
+
+    local players = entities.FindByClass("CTerrorPlayer")
+    for i = 1, #players do
+        if players[i]:GetPropInt("m_zombieClass") == 8 then
+            tank = players[i]
+            break
+        end
+    end
+
+    if not tank then return nil end
+
+    local tankPos = tank:GetAbsOrigin()
+
+    local best = nil
+    local bestDist = 99999
+
+    for i = 1, 2048 do
+        local ent = entities.GetByIndex(i)
+
+        if ent and ent:GetClass() == "CBaseCSGrenadeProjectile" then
+            local pos = ent:GetAbsOrigin()
+            local dist = (pos - tankPos):Length()
+
+            if dist < bestDist then
+                bestDist = dist
+                best = ent
+            end
+        end
+    end
+
+    return best
+end
+
+
+callbacks.Register("Draw", "rock_predict", function()
+
+    local rock = GetRock()
+
+    if not rock then
+        lockedVel = nil
+        lockedPos = nil
+        return
+    end
+
+    local pos = rock:GetAbsOrigin()
+
+    local ok, vel = pcall(function()
+        return rock:GetPropVector("m_vecVelocity")
+    end)
+
+    if not ok or not vel then return end
+
+    if not lockedVel or globals.RealTime() - lockedTime > LOCK_DURATION then
+        lockedVel = Vector3(vel.x, vel.y, vel.z)
+        lockedPos = Vector3(pos.x, pos.y, pos.z)
+        lockedTime = globals.RealTime()
+    end
+
+    local simPos = Vector3(lockedPos.x, lockedPos.y, lockedPos.z)
+    local simVel = Vector3(lockedVel.x, lockedVel.y, lockedVel.z)
+
+    local lastX, lastY = nil, nil
+    local impactPos = nil
+
+    for i = 1, MAX_STEPS do
+
+        simPos = simPos + simVel * STEP
+
+        simVel.z = simVel.z - GRAVITY
+
+        local x, y = client.WorldToScreen(simPos)
+
+        if x and y then
+            if lastX and lastY then
+                draw.Color(255, 120, 120, 200)
+                draw.Line(lastX, lastY, x, y)
+            end
+            lastX, lastY = x, y
+        end
+
+        if simPos.z < lockedPos.z - 300 then
+            impactPos = Vector3(simPos.x, simPos.y, simPos.z)
+            break
+        end
+    end
+
+    if impactPos then
+        local x, y = client.WorldToScreen(impactPos)
+
+        if x and y then
+            draw.Color(255, 0, 0, 255)
+            draw.OutlinedCircle(x, y, 8)
+
+            draw.SetFont(font)
+            draw.Color(255, 255, 255, 255)
+            draw.Text(x + 10, y, "impact")
+        end
+    end
+
+end)
+
+===== END: Rock Predict =====
+
+===== FILE: T1 Shotgun Helpers =====
+another legit sheet just nvm shootin after reload is pretty detectable in my zm cfg. so this is the resolver
+
+-- AimassistChromeandPump for records
+
+local wasM2HoldPressed = false
+local aimbotWasDisabledByHold = false
+
+local wasRPressed = false
+local wasM1Pressed = false
+local wasM2SequencePressed = false
+local aimbotWasDisabledByR = false
+local lastM1PressTime = 0
+local sequenceTimeout = 0.4 -- M1 ve M2 arasındaki saniye
+
+local function isAimbotEnabled()
+    if not gui or not gui.GetValue then return false end
+    local rbotActive = (gui.GetValue("rbot.master") and gui.GetValue("rbot.enable"))
+    local lbotActive = (gui.GetValue("lbot.master") and gui.GetValue("lbot.aim.enable"))
+    return rbotActive or lbotActive
+end
+
+local function setAimbot(enable)
+    if not gui or not gui.SetValue then return end
+    if gui.GetValue("rbot.master") then gui.SetValue("rbot.enable", enable and 1 or 0) end
+    if gui.GetValue("lbot.master") then gui.SetValue("lbot.aim.enable", enable and 1 or 0) end
+end
+
+local function hasButton(buttons, flag)
+    return (buttons % (flag * 2)) >= flag
+end
+
+local ref = gui.Reference("MISC")
+local tab = gui.Tab(ref, "aimbot_suite", "Aimbot Suite")
+local box = gui.Groupbox(tab, "Aimbot Kontrolcüsü", 16, 16, 320, 240)
+
+local menu = {
+    enable_hold = gui.Checkbox(box, "as_enable_hold", "purna: M2 Basılı Tut Kapat", true),
+    enable_toggle = gui.Checkbox(box, "as_enable_toggle", "purni: R Kapat / M1->M2 Aç", true),
+}
+
+
+callbacks.Register("CreateMove", function(cmd)
+    local localPlayer = entities.GetLocalPlayer()
+    if not localPlayer or not localPlayer:IsAlive() then return end
+
+    local buttons = cmd:GetButtons()
+    local rPressed = input.IsButtonDown(82) 
+    local m1Pressed = hasButton(buttons, 1)    
+    local m2Pressed = hasButton(buttons, 2048) 
+
+    if menu.enable_hold:GetValue() then
+        if m2Pressed and not wasM2HoldPressed then
+            if isAimbotEnabled() then
+                setAimbot(false)
+                aimbotWasDisabledByHold = true
+            end
+        end
+
+        if not m2Pressed and wasM2HoldPressed then
+            if aimbotWasDisabledByHold then
+                setAimbot(true)
+                aimbotWasDisabledByHold = false
+            end
+        end
+        wasM2HoldPressed = m2Pressed
+    end
+
+    if menu.enable_toggle:GetValue() then
+        if rPressed and not wasRPressed then
+            if isAimbotEnabled() then
+                setAimbot(false)
+                aimbotWasDisabledByR = true
+            end
+        end
+
+        if m1Pressed and not wasM1Pressed then
+            lastM1PressTime = globals.RealTime()
+        end
+
+        if m2Pressed and not wasM2SequencePressed then
+            if (globals.RealTime() - lastM1PressTime) <= sequenceTimeout then
+                setAimbot(true)
+                aimbotWasDisabledByR = false 
+                lastM1PressTime = 0
+            end
+        end
+    end
+
+    wasRPressed = rPressed
+    wasM1Pressed = m1Pressed
+    wasM2SequencePressed = m2Pressed
+end)
+
+callbacks.Register("Unload", function()
+    if aimbotWasDisabledByHold or aimbotWasDisabledByR then
+        setAimbot(true)
+    end
+end)
+
+===== END: T1 Shotgun Helpers =====
+
+===== FILE: Tank Rock Aimbot =====
+for T1 weapons btw. Can use rage cuz there s no aimbot detection for tank rock killed event lol SMAC n LILAC so ez to bypass u can literally shoot tank with ur ragebot or can autoceil or 
+even tank rock aimbot etc.. so many aim shit it undetect just use that 
+
+
+
+--Tank Rock Aimbot for Zm
+
+local ref = gui.Reference("Misc")
+local tab = gui.Tab(ref, "rock.tab", "Rock Aimbot")
+
+local box = gui.Groupbox(tab, "Aimbot", 10, 10, 300, 160)
+
+local enable = gui.Checkbox(box, "rock.enable", "Enable", true)
+
+local rage   = gui.Checkbox(box, "rock.rage", "Rage Mode", false)
+
+local fov_sl = gui.Slider(box, "rock.fov", "FOV", 60, 1, 180)
+local smooth = gui.Slider(box, "rock.smooth", "Smooth", 12, 1, 50)
+
+
+local function NormalizeYaw(y)
+    while y > 180 do y = y - 360 end
+    while y < -180 do y = y + 360 end
+    return y
+end
+
+local function CalcAngle(src, dst)
+    local delta = dst - src
+    local hyp = math.sqrt(delta.x * delta.x + delta.y * delta.y)
+
+    local pitch = math.deg(math.atan2(-delta.z, hyp))
+    local yaw   = math.deg(math.atan2(delta.y, delta.x))
+
+    return pitch, yaw
+end
+
+local function GetFov(view, target)
+    local dy = NormalizeYaw(target.y - view.y)
+    local dx = target.x - view.x
+    return math.sqrt(dx*dx + dy*dy)
+end
+
+
+local function GetRock()
+
+    local tank = nil
+
+    local players = entities.FindByClass("CTerrorPlayer")
+    for i = 1, #players do
+        local p = players[i]
+        if p:GetPropInt("m_zombieClass") == 8 then
+            tank = p
+            break
+        end
+    end
+
+    if not tank then return nil end
+
+    local tankPos = tank:GetAbsOrigin()
+
+    local best = nil
+    local bestDist = 99999
+
+    for i = 1, 2048 do
+        local ent = entities.GetByIndex(i)
+
+        if ent and ent:GetClass() == "CBaseCSGrenadeProjectile" then
+            local pos = ent:GetAbsOrigin()
+            local dist = (pos - tankPos):Length()
+
+            if dist < bestDist then
+                bestDist = dist
+                best = ent
+            end
+        end
+    end
+
+    return best
+end
+
+
+callbacks.Register("CreateMove", "rock_aimbot", function(cmd)
+
+    if not enable:GetValue() then return end
+
+    if not input.IsButtonDown(1) then return end
+
+    local me = entities.GetLocalPlayer()
+    if not me or not me:IsAlive() then return end
+
+    local rock = GetRock()
+    if not rock then return end
+
+    local myPos = me:GetAbsOrigin()
+    local rockPos = rock:GetAbsOrigin()
+
+    local offset = 45
+
+    local ok, vel = pcall(function()
+        return rock:GetPropVector("m_vecVelocity")
+    end)
+
+    if ok and vel then
+        local speed = vel:Length()
+        offset = 35 + (speed / 40)
+    end
+
+    rockPos.z = rockPos.z - offset
+
+    local pitch, yaw = CalcAngle(myPos, rockPos)
+    local view = cmd:GetViewAngles()
+
+    local target = {x = pitch, y = yaw}
+    local fov = GetFov(view, target)
+
+    if fov > fov_sl:GetValue() then return end
+
+    if rage:GetValue() then
+        engine.SetViewAngles(EulerAngles(pitch, yaw, 0))
+        return
+    end
+
+    local s = smooth:GetValue()
+
+    local deltaX = pitch - view.x
+    local deltaY = NormalizeYaw(yaw - view.y)
+
+    local newX = view.x + deltaX / s
+    local newY = view.y + deltaY / s
+
+    engine.SetViewAngles(EulerAngles(newX, newY, 0))
+
+end)
+
+===== END: Tank Rock Aimbot =====
+
+===== FILE: Yaw Spinbot =====
+local spin_yaw = 0
+local spin_speed = 0 
+local IN_ATTACK = 1
+
+local function on_create_move(cmd)
+    if not cmd then return end
+    
+    if bit.band(cmd.buttons, IN_ATTACK) ~= 0 then 
+        return 
+    end
+    spin_yaw = spin_yaw + spin_speed
+    if spin_yaw > 180 then spin_yaw = spin_yaw - 360 end
+    if spin_yaw < -180 then spin_yaw = spin_yaw - 360 end
+    
+    cmd.viewangles = EulerAngles(-89.0, spin_yaw, 0.0)
+end
+
+callbacks.Register("CreateMove", on_create_move)
+
+===== END: Yaw Spinbot =====
