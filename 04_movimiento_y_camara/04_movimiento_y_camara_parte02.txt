@@ -1,0 +1,382 @@
+
+===== FILE: Freelook =====
+--fıriluk
+
+local ref = gui.Reference("Misc", "General", "Extra")
+local gb  = gui.Groupbox(ref, "Free Look", 295, 365, 300, 0)
+
+local enable  = gui.Checkbox(gb, "fl.enable", "Enable Free Look", false)
+local keybind = gui.Keybox(gb, "fl.key", "Hold Key", 0) 
+
+local saved_angles = nil
+local free_angles  = nil
+
+callbacks.Register("CreateMove", "freelook", function(cmd)
+    if not enable:GetValue() then
+        saved_angles = nil
+        free_angles  = nil
+        return
+    end
+
+    local keycode = keybind:GetValue()
+    if keycode == 0 then return end
+    
+    local held = input.IsButtonDown(keycode)
+
+    if held then
+        if not free_angles then
+            saved_angles = engine.GetViewAngles()
+            free_angles  = EulerAngles(saved_angles.x, saved_angles.y, 0)
+        end
+
+        local cur = engine.GetViewAngles()
+        free_angles = EulerAngles(cur.x, cur.y, 0)
+
+        cmd:SetViewAngles(EulerAngles(saved_angles.x, saved_angles.y, 0))
+    else
+        if saved_angles then
+            engine.SetViewAngles(EulerAngles(saved_angles.x, saved_angles.y, 0))
+            saved_angles = nil
+            free_angles  = nil
+        end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    gb:Remove()
+end)
+
+===== END: Freelook =====
+
+===== FILE: No Fall Damage =====
+just AddOutSeqNr goat again... and 10000 is enough but dunno its integer so i can do it. even 2^31 but idk never tried also i dont wanna engine error XDXDX
+
+-- No Fall Dmg 
+local ref = gui.Reference("Misc", "General", "Extra")
+
+local nofall_key = gui.Keybox(ref, "ffi.nofall_key", "No Fall", 0)
+
+callbacks.Register("CreateMove", "nofall_logic", function(cmd)
+    local key = nofall_key:GetValue()
+    
+    if key ~= 0 and input.IsButtonDown(key) then
+        engine.AddOutSeqNr(20000)
+    end
+end)
+
+
+===== END: No Fall Damage =====
+
+===== FILE: No Hang and Incap Damage =====
+--nohangplusincap
+local ref = gui.Reference("Misc", "General", "Extra")
+
+local auto_hang_enable = gui.Checkbox(ref, "auto.nohang", "Auto No Hang/Incap", false)
+
+callbacks.Register("CreateMove", "auto_hang_logic", function(cmd)
+    if not auto_hang_enable:GetValue() then return end
+
+    local pLocal = entities.GetLocalPlayer()
+    if not pLocal or not pLocal:IsAlive() then return end
+    local isHanging = pLocal:GetPropInt("m_isHangingFromLedge")
+    local isIncap = pLocal:GetPropInt("m_isIncapacitated")
+
+    if isHanging == 1 or isIncap == 1 then
+        engine.AddOutSeqNr(10000)
+    end
+end)
+
+===== END: No Hang and Incap Damage =====
+
+===== FILE: No Interp =====
+local ref = gui.Reference("Misc", "General", "Extra")
+local zero_interp_enable = gui.Checkbox(ref, "misc.network.zero_interp", "No Interpolation", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if not icvar then return end
+
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetFloat  = ffi.cast("void(__thiscall*)(void*, float)", ffi.cast("uintptr_t**", ptr)[0][13]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_interp = SetupConVar("cl_interp")
+local cv_ratio  = SetupConVar("cl_interp_ratio")
+
+if cv_interp then cv_interp.RemoveFlags(cv_interp.ptr, FCVAR_CHEAT) end
+if cv_ratio  then cv_ratio.RemoveFlags(cv_ratio.ptr, FCVAR_CHEAT) end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "zero_interp_logic", function(cmd)
+    local enabled = zero_interp_enable:GetValue()
+    
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        if cv_interp then cv_interp.SetFloat(cv_interp.ptr, 0.0) end
+        if cv_ratio  then cv_ratio.SetFloat(cv_ratio.ptr, 0.0) end
+    else
+        if cv_interp then cv_interp.SetFloat(cv_interp.ptr, 0.1) end
+        if cv_ratio  then cv_ratio.SetFloat(cv_ratio.ptr, 2.0) end
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_interp then cv_interp.SetFloat(cv_interp.ptr, 0.1) end
+    if cv_ratio  then cv_ratio.SetFloat(cv_ratio.ptr, 2.0) end
+end)
+
+===== END: No Interp =====
+
+===== FILE: Nofall Aika method =====
+credits to aika idk if it works cuz didnt try 
+
+
+
+ffi.cdef[[
+    typedef struct {
+        char pad[8];
+        int sequence_number; // NetChannel + 8 offseti
+    } NetChannel_t;
+]]
+
+local engine_base = ffi.cast("uintptr_t", ffi.C.GetModuleHandleA("engine.dll"))
+
+local function ExecuteSequenceShift(local_player_ptr)
+    if not local_player_ptr or local_player_ptr == 0 then return end
+
+    local ptr1 = ffi.cast("uintptr_t*", engine_base + 0x4276CC)[0] 
+    local netChannel = ffi.cast("uintptr_t*", ptr1 + 24)[0]
+
+    if netChannel == 0 then return end
+
+    local netChannelStruct = ffi.cast("NetChannel_t*", netChannel)
+    
+    local currentSeq = netChannelStruct.sequence_number
+    netChannelStruct.sequence_number = currentSeq + 90000 
+end
+
+callbacks.Register("CreateMove", "ffi_exploit_logic", function(cmd)
+    local local_player = entity.get_local_player()
+    if not local_player then return end
+    
+    local pAddr = ffi.cast("uintptr_t", local_player:get_address())
+    local tickbase = ffi.cast("float*", pAddr + 0x11FC)[0]
+    
+    if tickbase > 560.0 then
+        ExecuteSequenceShift(pAddr)
+    end
+end)
+
+===== END: Nofall Aika method =====
+
+===== FILE: Nohands =====
+It ll be crash when u return main menu DONT USE THIS. Im just sharin cuz why not. (Use local hand chams alpha zero instead of this its same shit at all)
+
+
+pcall(function()
+    ffi.cdef[[
+        int VirtualProtect(void* lpAddress, size_t dwSize, 
+                          uint32_t flNewProtect, uint32_t* lpflOldProtect);
+    ]]
+end)
+
+local k32 = ffi.load("kernel32")
+local PAGE_EXECUTE_READWRITE = 0x40
+
+local function purna()
+    local addr = mem.FindPattern("client.dll", "55 8B EC 8B 55 08 56 8B 75 0C 57")
+    if addr == nil then
+        print("sig null")
+        return
+    end
+
+    local iaddr = tonumber(ffi.cast("uintptr_t", addr)) or 0
+    print(string.format("func: 0x%X", iaddr))
+
+    -- +0x16 = cmp eax,ecx | +0x18 = jne
+    local ptr = ffi.cast("uint8_t*", addr + 0x18)
+
+   
+    if ptr[0] == 0x90 and ptr[1] == 0x90 then
+        print("[Revealer] Zaten patch'li.")
+        return
+    end
+
+   
+    if ptr[0] ~= 0x75 or ptr[1] ~= 0x08 then
+        print(string.format("bytes: %02X %02X", ptr[0], ptr[1]))
+        return
+    end
+
+    local ok, err = pcall(function()
+        local old = ffi.new("uint32_t[1]")
+        k32.VirtualProtect(ptr, 2, PAGE_EXECUTE_READWRITE, old)
+        ptr[0] = 0x90
+        ptr[1] = 0x90
+        k32.VirtualProtect(ptr, 2, old[0], old)
+    end)
+
+    if ok then
+        print("patch done")
+    else
+        print("pııırrrtt: " .. tostring(err))
+    end
+end
+
+purna()
+print("Nohandsloaded")
+
+===== END: Nohands =====
+
+===== FILE: Slowwalk =====
+--slowwalkshit
+
+local REF = gui.Reference("Misc")
+local TAB = gui.Tab(REF, "l4d2.crawl", "L4D2 Crawl")
+local GROUP = gui.Groupbox(TAB, "Movement Control", 16, 16, 296, 200)
+
+local crawl_enable = gui.Checkbox(GROUP, "l4d2.crawl.enable", "Ultra Crawl Mode", false)
+
+local crawl_speed_percent = gui.Slider(GROUP, "l4d2.crawl.speed", "Crawl Speed (%)", 25, 5, 60)
+
+local MAX_ENGINE_SPEED = 450
+
+callbacks.Register("CreateMove", function(cmd)
+    if not crawl_enable:GetValue() then return end
+
+    local lp = entities.GetLocalPlayer()
+    if not lp or not lp:IsAlive() then return end
+
+    local forward = cmd:GetForwardMove()
+    local side    = cmd:GetSideMove()
+    local up      = cmd:GetUpMove()
+  
+    if forward == 0 and side == 0 then return end
+
+    local length = math.sqrt(forward*forward + side*side)
+    if length > 0 then
+        local factor = crawl_speed_percent:GetValue() / 100 -- % to factor
+        forward = (forward / length) * MAX_ENGINE_SPEED * factor
+        side    = (side / length) * MAX_ENGINE_SPEED * factor
+    end
+
+    cmd:SetForwardMove(forward)
+    cmd:SetSideMove(side)
+    cmd:SetUpMove(up * 0.2) 
+end)
+
+===== END: Slowwalk =====
+
+===== FILE: Thirdperson =====
+-- Tps (will add horizontal and vertical offsets) 
+
+local ref = gui.Reference("Misc", "General", "Extra")
+local thirdperson = gui.Checkbox(ref, "misc.thirdperson", "Third Person", false)
+
+pcall(function()
+    ffi.cdef[[
+        void* GetModuleHandleA(const char* lpModuleName);
+        void* GetProcAddress(void* hModule, const char* lpProcName);
+    ]]
+end)
+
+local FCVAR_CHEAT = 16384
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    if module == nil then return nil end
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    if ci_addr == nil then return nil end
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+if icvar == nil then print("interfacenull") return end
+
+local find_var_fn = ffi.cast(
+    "void*(__thiscall*)(void*, const char*)",
+    ffi.cast("uintptr_t**", icvar)[0][13]
+)
+
+local function FindConVar(name)
+    local ok, result = pcall(function()
+        return find_var_fn(icvar, name)
+    end)
+    if not ok or result == nil then return nil end
+    if ffi.cast("uintptr_t", result) == 0 then return nil end
+    return result
+end
+
+local function RemoveCheatFlag(cv)
+    if cv == nil then return end
+    local fn = ffi.cast(
+        "void(__thiscall*)(void*, int)",
+        ffi.cast("uintptr_t**", cv)[0][4]
+    )
+    pcall(fn, cv, FCVAR_CHEAT)
+end
+
+local function SetFloat(cv, value)
+    if cv == nil then return end
+    local fn = ffi.cast(
+        "void(__thiscall*)(void*, float)",
+        ffi.cast("uintptr_t**", cv)[0][13]
+    )
+    pcall(fn, cv, value)
+end
+
+local cv_dist = FindConVar("z_view_distance")
+if cv_dist then
+    RemoveCheatFlag(cv_dist)
+    print("r")
+else
+    print("null")
+end
+
+local last_state = false
+
+callbacks.Register("CreateMove", "thirdperson_move", function(cmd)
+    local enabled = thirdperson:GetValue()
+    if enabled == last_state then return end
+    last_state = enabled
+
+    if enabled then
+        SetFloat(cv_dist, -150.0)
+    else
+        SetFloat(cv_dist, 0.0)
+    end
+end)
+
+callbacks.Register("Unload", function()
+    if cv_dist then SetFloat(cv_dist, 0.0) end
+end)
+
+===== END: Thirdperson =====
