@@ -1,0 +1,364 @@
+
+===== FILE: No Steam Logon Case Patches =====
+3 case u can string search on IDA PRO so basic 
+
+
+
+
+pcall(function()
+    ffi.cdef[[
+        bool VirtualProtect(void* lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t* lpflOldProtect);
+    ]]
+end)
+
+local function write_bytes(addr, bytes)
+    local ptr = ffi.cast("uint8_t*", addr)
+    local old = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", addr), #bytes, 0x40, old)
+    for i, b in ipairs(bytes) do
+        ptr[i-1] = b
+    end
+    ffi.C.VirtualProtect(ffi.cast("void*", addr), #bytes, old[0], old)
+end
+
+local p1 = mem.FindPattern("engine.dll", "83 BB 84 00 00 00 01 0F 84 D9 00 00 00")
+if p1 then
+    local a = ffi.cast("uintptr_t", p1) + 7
+    write_bytes(a, {0xE9, 0xDA, 0x00, 0x00, 0x00, 0x90})
+    print(string.format("[NSL] case1 patched @ 0x%X", a))
+else
+    print("[NSL] case1 pattern bulunamadi")
+end
+
+local p6 = mem.FindPattern("engine.dll", "83 BB 84 00 00 00 01 74 5E 8B 16")
+if p6 then
+    local a = ffi.cast("uintptr_t", p6) + 7
+    write_bytes(a, {0xEB})
+    print(string.format("[NSL] case6 patched @ 0x%X", a))
+else
+    print("[NSL] case6 pattern bulunamadi")
+end
+
+local p78 = mem.FindPattern("engine.dll", "83 BB 84 00 00 00 01 74 3E 8B 0E")
+if p78 then
+    local a = ffi.cast("uintptr_t", p78) + 7
+    write_bytes(a, {0xEB})
+    print(string.format("[NSL] case7/8 patched @ 0x%X", a))
+else
+    print("[NSL] case7/8 pattern bulunamadi")
+end
+
+===== END: No Steam Logon Case Patches =====
+
+===== FILE: Pure and Consistency Bypass =====
+-- CANIN SAAAG OLSUUUUUN CANIN SAG OLSUN BEN CEKERİİM KADER SAAAG OLSUUUUUUUN KADER SAG OLSUN BEN GİDERİM
+local ref = gui.Reference("Misc", "General", "Extra")
+local opt_bypass = gui.Checkbox(ref, "ffi.consistency_bypass", "Bypass sv_consistency and sv_pure", false)
+
+ffi.cdef[[
+    void* GetModuleHandleA(const char* lpModuleName);
+    void* GetProcAddress(void* hModule, const char* lpProcName);
+]]
+
+local FCVAR_CHEAT = 16384
+local FCVAR_PROTECTED = 2048 
+
+local function GetInterface(dll, name)
+    local module = ffi.C.GetModuleHandleA(dll)
+    local ci_addr = ffi.C.GetProcAddress(module, "CreateInterface")
+    local ci = ffi.cast("void*(__cdecl*)(const char*, int*)", ci_addr)
+    return ci(name, nil)
+end
+
+local icvar = GetInterface("vstdlib.dll", "VEngineCvar007")
+local find_var_fn = ffi.cast("void*(__thiscall*)(void*, const char*)", ffi.cast("uintptr_t**", icvar)[0][13])
+
+local function SetupConVar(name)
+    local ptr = find_var_fn(icvar, name)
+    if ptr == nil or ffi.cast("uintptr_t", ptr) == 0 then return nil end
+    
+    return {
+        ptr = ptr,
+        SetInt      = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][16]),
+        RemoveFlags = ffi.cast("void(__thiscall*)(void*, int)", ffi.cast("uintptr_t**", ptr)[0][4])
+    }
+end
+
+local cv_consistency = SetupConVar("sv_consistency")
+local cv_pure = SetupConVar("sv_pure")
+
+if cv_consistency then 
+    cv_consistency.RemoveFlags(cv_consistency.ptr, FCVAR_CHEAT + FCVAR_PROTECTED) 
+end
+if cv_pure then 
+    cv_pure.RemoveFlags(cv_pure.ptr, FCVAR_CHEAT + FCVAR_PROTECTED) 
+end
+
+callbacks.Register("CreateMove", "bypass_logic", function(cmd)
+    if not opt_bypass:GetValue() then return end
+  
+    if cv_consistency then cv_consistency.SetInt(cv_consistency.ptr, 0) end
+    if cv_pure then cv_pure.SetInt(cv_pure.ptr, 0) end
+end)
+
+===== END: Pure and Consistency Bypass =====
+
+===== FILE: Reconnect Bypass =====
+
+
+local DEBUG_STATUS = false
+
+ffi.cdef[[
+ int RegOpenKeyExA(void* hKey, const char* lpSubKey, unsigned long ulOptions, unsigned long samDesired, void** phkResult);
+ int RegQueryValueExA(void* hKey, const char* lpValueName, unsigned long* lpReserved, unsigned long* lpType, unsigned char* lpData, unsigned long* lpcbData);
+ int RegCloseKey(void* hKey);
+ void* ShellExecuteA(void* hwnd, const char* lpOperation, const char* lpFile, const char* lpParameters, const char* lpDirectory, int nShowCmd);
+ void* CreateFileA(const char* lpFileName, unsigned long dwDesiredAccess, unsigned long dwShareMode, void* lpSecurityAttributes, unsigned long dwCreationDisposition, unsigned long dwFlagsAndAttributes, void* hTemplateFile);
+ int CloseHandle(void* hObject);
+]]
+
+local SW_HIDE = 0x0
+local SW_SHOW = 0x5
+local SW_POWERSHELL = DEBUG_STATUS and SW_SHOW or SW_HIDE
+
+local ERROR_SUCCESS    = 0x0
+local HKEY_CURRENT_USER = ffi.cast("void*", 0x80000001)
+local HKEY_STEAM_SUB_PATH = "Software\\Valve\\Steam"
+local KEY_QUERY_VALUE  = 0x0001
+local GENERIC_ALL      = 0x10000000
+local CREATE_ALWAYS    = 0x2
+local FILE_ATTRIBUTE_NORMAL = 0x80
+local INVALID_HANDLE_VALUE  = ffi.cast("void*", -0x1)
+
+local Advapi32 = ffi.load("Advapi32")
+local Shell32  = ffi.load("Shell32")
+local Kernel32 = ffi.load("Kernel32")
+
+local cPowerShell_BlockFileName  = "L4D2_BLOCK.dat"
+local cPowerShell_UnlockFileName = "L4D2_UNBLOCK.dat"
+local cPowerShell_ExitFileName   = "L4D2_EXIT.dat"
+local cPowerShell_RuleName       = "L4D2ReconnectBypass"
+local cPowerShell_WindowTitle    = "L4D2_PSBridge"
+
+local cFullSteamPath  = ""
+local cBackupSteamPath = "C:\\Program Files (x86)\\Steam\\steam.exe"
+local TempBridgePath  = ""
+
+local bPowerShellWasInit = false
+
+
+local ref = gui.Reference("Misc", "General", "Extra")
+local enable_ref  = gui.Checkbox(ref, "rcb.on",  "Block Steam Conn",  false)
+local status_text = gui.Text(ref, "rcb.status", "Status: --")
+
+
+local function GetSteamPath()
+    if not Advapi32 then
+        cFullSteamPath = cBackupSteamPath
+        return
+    end
+
+    local hKey = ffi.new("void*[1]")
+    local ok, res = pcall(function()
+        return Advapi32.RegOpenKeyExA(HKEY_CURRENT_USER, HKEY_STEAM_SUB_PATH, 0, KEY_QUERY_VALUE, hKey)
+    end)
+
+    if ok and res == ERROR_SUCCESS then
+        local buf  = ffi.new("unsigned char[1024]")
+        local bsz  = ffi.new("unsigned long[1]", 1024)
+        ok, res = pcall(function()
+            return Advapi32.RegQueryValueExA(hKey[0], "SteamExe", nil, nil, buf, bsz)
+        end)
+        cFullSteamPath = (ok and res == ERROR_SUCCESS)
+            and ffi.string(buf):gsub("/", "\\")
+            or cBackupSteamPath
+        pcall(function() Advapi32.RegCloseKey(hKey[0]) end)
+    else
+        cFullSteamPath = cBackupSteamPath
+    end
+end
+
+
+local function InitPowerShellScript()
+    TempBridgePath = cFullSteamPath:gsub("\\steam%.exe", "")
+
+   
+    local ps = string.format([[
+        Start-Sleep -Milliseconds 150;
+        Remove-Item -Path '%s' -Force -ErrorAction SilentlyContinue;
+        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\mpssvc' -Name 'Start' -Value 2;
+        Start-Sleep -Milliseconds 100;
+        net start mpssvc;
+        Start-Sleep -Milliseconds 100;
+        netsh advfirewall set allprofiles state on;
+        Get-Process 'powershell' -ErrorAction SilentlyContinue |
+            Where-Object { $_.MainWindowTitle -match '%s' } | Stop-Process -Force;
+        Start-Sleep -Milliseconds 100;
+        $host.UI.RawUI.WindowTitle = '%s';
+        while ([bool](Get-Process -Name 'left4dead2' -ErrorAction SilentlyContinue)) {
+            if (Test-Path -Path '%s') {
+                Start-Sleep -Milliseconds 100;
+                Remove-Item -Path '%s' -Force;
+                Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue;
+                New-NetFirewallRule -DisplayName '%s' -Direction Outbound -Action Block -Program '%s';
+            }
+            if (Test-Path -Path '%s') {
+                Start-Sleep -Milliseconds 100;
+                Remove-Item -Path '%s' -Force;
+                Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue;
+            }
+            if (Test-Path -Path '%s') {
+                Start-Sleep -Milliseconds 100;
+                Remove-Item -Path '%s' -Force;
+                Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue;
+                break;
+            }
+            Start-Sleep -Milliseconds 100;
+        }
+        Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue;
+        Start-Sleep -Milliseconds 3000;
+    ]],
+        
+        TempBridgePath .. '\\' .. cPowerShell_ExitFileName,
+        cPowerShell_WindowTitle, cPowerShell_WindowTitle,
+        TempBridgePath .. '\\' .. cPowerShell_BlockFileName,
+        TempBridgePath .. '\\' .. cPowerShell_BlockFileName,
+        cPowerShell_RuleName, cPowerShell_RuleName, cFullSteamPath,
+        TempBridgePath .. '\\' .. cPowerShell_UnlockFileName,
+        TempBridgePath .. '\\' .. cPowerShell_UnlockFileName,
+        cPowerShell_RuleName,
+        TempBridgePath .. '\\' .. cPowerShell_ExitFileName,
+        TempBridgePath .. '\\' .. cPowerShell_ExitFileName,
+        cPowerShell_RuleName,
+        cPowerShell_RuleName
+    )
+
+    
+    ps = ps:gsub("\n%s*", " ")
+
+    local args = '-ExecutionPolicy Bypass -Command "' .. ps .. '"'
+    if DEBUG_STATUS then
+        args = '-NoExit ' .. args
+        print("[RCB] PS args: " .. args)
+    else
+        args = '-WindowStyle Hidden ' .. args
+    end
+
+    local ok, hInst = pcall(function()
+        return Shell32.ShellExecuteA(nil, "runas", "powershell.exe", args, nil, SW_POWERSHELL)
+    end)
+
+    if ok and tonumber(ffi.cast("intptr_t", hInst)) > 32 then
+        print("[RCB] PowerShell baslatildi")
+        return true
+    else
+        print("[RCB] HATA: Admin yetkisi gerekli!")
+        return false
+    end
+end
+
+
+local function CreateActionFile(fileName)
+    if not Kernel32 then return false end
+    local fullPath = TempBridgePath .. '\\' .. fileName
+    local ok, hFile = pcall(function()
+        return Kernel32.CreateFileA(fullPath, GENERIC_ALL, 0, nil, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nil)
+    end)
+    if ok and hFile ~= INVALID_HANDLE_VALUE then
+        pcall(function() Kernel32.CloseHandle(hFile) end)
+        return true
+    end
+    print("[RCB] Dosya olusturulamadi: " .. fullPath)
+    return false
+end
+
+
+local function EnsureInit()
+    if not bPowerShellWasInit then
+        GetSteamPath()
+        if InitPowerShellScript() then
+            bPowerShellWasInit = true
+        end
+    end
+    return bPowerShellWasInit
+end
+
+
+local last_val = false
+callbacks.Register("Draw", "rcb_toggle", function()
+    local val = enable_ref:GetValue()
+    if val == last_val then return end
+    last_val = val
+
+    if val then
+        if EnsureInit() then
+            if CreateActionFile(cPowerShell_BlockFileName) then
+                print("[RCB] Steam ENGELLENDI")
+            end
+        end
+    else
+        if EnsureInit() then
+            if CreateActionFile(cPowerShell_UnlockFileName) then
+                print("[RCB] Steam engeli KALDIRILDI")
+            end
+        end
+    end
+end)
+
+
+callbacks.Register("Unload", function()
+    if bPowerShellWasInit then
+        CreateActionFile(cPowerShell_ExitFileName)
+        print("[RCB] Temizlendi")
+    end
+end)
+
+print("[RCB] Yuklendi")
+
+===== END: Reconnect Bypass =====
+
+===== FILE: Resist Smoker =====
+local yakalandikmi = 0 -- Dil ile çekilip çekilmediğimizi tutan değişken
+
+local function MURY(olay)
+
+	local silayaasigim = client.GetLocalPlayerIndex()
+	local ikikuzukula = olay:GetInt("victim")
+	local getuidamk = client.GetPlayerIndexByUserID(ikikuzukula)
+
+	if olay:GetName() == "tongue_grab" then
+
+		if getuidamk == silayaasigim then
+			yakalandikmi = 1		
+		end
+	
+	elseif olay:GetName() == "tongue_release" then
+
+		if getuidamk == silayaasigim then
+			yakalandikmi = 0		
+		end
+
+	end
+
+end
+
+client.AllowListener("tongue_release")
+client.AllowListener("tongue_grab")
+callbacks.Register("FireGameEvent", MURY)
+
+
+local function sikintiYok()
+	local benimEleman = entities:GetLocalPlayer()
+
+	if yakalandikmi == 1 and benimEleman ~= nil then
+		engine.AddOutSeqNr(10000)
+	else 
+		yakalandikmi = 0
+		engine.AddOutSeqNr(0)
+	end
+
+end
+             
+callbacks.Register("Draw", sikintiYok)
+
+===== END: Resist Smoker =====

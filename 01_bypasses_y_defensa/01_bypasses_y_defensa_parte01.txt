@@ -1,0 +1,448 @@
+
+===== FILE: Aimware Injection Msg =====
+--Inj Msg 
+local FADE_IN   = 0.6
+local HOLD_TIME = 1.8
+local FADE_OUT  = 0.6
+
+--
+local startTime = globals.RealTime()
+
+--
+local function clamp(x, min, max)
+    if x < min then return min end
+    if x > max then return max end
+    return x
+end
+
+--
+callbacks.Register("Draw", function()
+    local t = globals.RealTime() - startTime
+    local total = FADE_IN + HOLD_TIME + FADE_OUT
+    if t > total then
+        return
+    end
+
+    local alpha = 0
+    if t < FADE_IN then
+        alpha = clamp(t / FADE_IN, 0, 1)
+    elseif t < FADE_IN + HOLD_TIME then
+        alpha = 1
+    else
+        alpha = clamp(1 - ((t - FADE_IN - HOLD_TIME) / FADE_OUT), 0, 1)
+    end
+
+    local sw, sh = draw.GetScreenSize()
+
+    --
+    local mainFont = draw.CreateFont("Arial", 80, 800)  --
+    draw.SetFont(mainFont)
+
+    local aimText = "AIM"
+    local wareText = "WARE"
+    local aimW, aimH = draw.GetTextSize(aimText)
+    local wareW, wareH = draw.GetTextSize(wareText)
+
+    local gap = 4  -- 
+    local totalWidth = aimW + wareW + gap
+    local startX = (sw - totalWidth) / 2
+    local startY = (sh - aimH) / 2
+
+    -- 
+    draw.Color(220, 40, 40, 255 * alpha)
+    draw.Text(startX, startY, aimText)
+
+    --
+    draw.Color(255, 255, 255, 255 * alpha)
+    draw.Text(startX + aimW + gap, startY, wareText)
+
+    --
+    local subFont = draw.CreateFont("Arial", 20, 400)  
+    draw.SetFont(subFont)
+
+    local subtitle = "ONE STEP AHEAD OF THE GAME"
+    local subW, subH = draw.GetTextSize(subtitle)
+
+    local subX = (sw - subW) / 2
+    local subY = startY + aimH + 10  
+
+    draw.Color(255, 255, 255, 255 * alpha)
+    draw.Text(subX, subY, subtitle)
+end)
+
+
+
+===== END: Aimware Injection Msg =====
+
+===== FILE: Anti Hunter =====
+basic 1v1 lua that nobody can catch u with this XDXDXD
+
+
+
+
+-- Anti Hunter with speedhack
+local LAG_VALUE = 1350
+local SPEEDHACK_AMOUNT = 2
+
+gui.SetValue("misc.speedhack.enable", true)
+gui.SetValue("misc.speedhack.amount", SPEEDHACK_AMOUNT)
+
+callbacks.Register("CreateMove", "Custom_Lag_Exploit", function(cmd)
+    engine.AddOutSeqNr(LAG_VALUE)
+    cmd:SetSendPacket(true)
+end)
+
+callbacks.Register("Unload", function()
+    gui.SetValue("misc.speedhack.enable", false)
+end)
+
+===== END: Anti Hunter =====
+
+===== FILE: Anti Jockey =====
+local anti_jockey = gui.Checkbox(
+    gui.Reference("Misc", "Movement"),
+    "anti_jockey",
+    "Anti Jockey",
+    false
+)
+
+local jockey_riding = false
+
+callbacks.Register("FireGameEvent", function(event)
+    if not event then return end
+
+    local name = event:GetName()
+
+    if name == "jockey_ride" then
+        jockey_riding = true
+
+    elseif name == "jockey_ride_end" then
+        jockey_riding = false
+    end
+end)
+
+callbacks.Register("CreateMove", function(cmd)
+    if not cmd then return end
+    if not anti_jockey:GetValue() then return end
+
+    if jockey_riding then
+        cmd.tick_count = 0x7FFFFFFF
+    end
+end)
+
+===== END: Anti Jockey =====
+
+===== FILE: Anti Kick =====
+Its not real anti callvote kick bcuz there s no anti kick in l4d2 its just hide ur name from ui but 
+people still can reach u with status and id so there s no escape lol but its n1 for pub lobbies
+
+
+
+local ref = gui.Reference("MISC", "GENERAL", "Main")
+local cb_setinfo = gui.Checkbox(ref, "lua_setinfo_name", "LJWFJWŞFRFDGW", false)
+
+local old_name = client.GetConVar("name")
+local last_state = false
+
+callbacks.Register("Draw", "L4D2_Setinfo_Name", function()
+    local current_state = cb_setinfo:GetValue()
+
+    if current_state ~= last_state then
+        if current_state then
+            old_name = client.GetConVar("name")
+            
+
+            client.Command("setinfo name \"  \"", false)
+            print("done")
+        else
+            if old_name and old_name ~= "" then
+              client.Command("setinfo name \"" .. old_name .. "\"", true)
+                print("21234: " .. old_name)
+            end
+        end
+        last_state = current_state
+    end
+end)
+
+===== END: Anti Kick =====
+
+===== FILE: Block Server Commands =====
+pcall(ffi.cdef, [[
+    void* GetModuleHandleA(const char* name);
+    int   VirtualProtect(void* addr, unsigned long size, unsigned long newProt, unsigned long* oldProt);
+]])
+local C = ffi.C
+
+local RVA   = 0x4E440
+local SIG   = { 0x8B, 0xC1, 0x8B, 0x48, 0x50, 0x8B, 0x11, 0x50, 0x8B, 0x42, 0x08, 0xFF, 0xD0, 0xC3,
+                0xCC, 0xCC, 0xB8, 0x0C, 0x00, 0x00, 0x00, 0xC3 }
+local PATCH = { 0xB0, 0x01, 0xC3 }
+
+local mod = C.GetModuleHandleA("engine.dll")
+if mod == nil then print("[BlockServerCmds] engine.dll bulunamadi") return end
+local base = tonumber(ffi.cast("uintptr_t", mod))
+
+local function match(addr)
+    local p = ffi.cast("uint8_t*", addr)
+    for i = 1, #SIG do
+        if p[i - 1] ~= SIG[i] then return false end
+    end
+    return true
+end
+
+local function find_target()
+    if match(base + RVA) then return base + RVA end
+
+    local dos = ffi.cast("uint8_t*", base)
+    local e_lfanew = ffi.cast("uint32_t*", dos + 0x3C)[0]
+    local nt = base + e_lfanew
+    local num_sections = ffi.cast("uint16_t*", nt + 6)[0]
+    local opt_size     = ffi.cast("uint16_t*", nt + 20)[0]
+    local sec = nt + 24 + opt_size
+
+    local found, count = nil, 0
+    for s = 0, num_sections - 1 do
+        local h = sec + s * 40
+        local vsize = ffi.cast("uint32_t*", h + 8)[0]
+        local vaddr = ffi.cast("uint32_t*", h + 12)[0]
+        local chars = ffi.cast("uint32_t*", h + 36)[0]
+        if bit.band(chars, 0x20000000) ~= 0 then                      
+            local b = base + vaddr
+            for i = 0, vsize - #SIG do
+                if match(b + i) then
+                    found, count = b + i, count + 1
+                end
+            end
+        end
+    end
+
+    if count == 1 then return found end
+    if count > 1 then print("[BlockServerCmds] imza birden fazla yerde eslesti (" .. count .. "), patch atilmadi") end
+    return nil
+end
+
+local target = find_target()
+if not target then
+    print("[BlockServerCmds] HATA: NET_StringCmd::Process bulunamadi, patch atilmadi")
+    return
+end
+
+local saved = {}
+local tp = ffi.cast("uint8_t*", target)
+for i = 1, #PATCH do saved[i] = tp[i - 1] end
+
+local function write_bytes(addr, bytes)
+    local ptr = ffi.cast("uint8_t*", addr)
+    local old = ffi.new("unsigned long[1]")
+    C.VirtualProtect(ptr, #bytes, 0x40, old)                    
+    for i = 1, #bytes do ptr[i - 1] = bytes[i] end
+    C.VirtualProtect(ptr, #bytes, old[0], old)
+end
+
+write_bytes(target, PATCH)
+print(string.format("[BlockServerCmds] NET_StringCmd::Process patched @ 0x%X", target))
+print("[BlockServerCmds] Sunucudan gelen string komutlari engellendi.")
+
+callbacks.Register("Unload", "block_server_cmds_unload", function()
+    write_bytes(target, saved)
+    print("[BlockServerCmds] kaldirildi, orijinal byte'lar geri yazildi")
+end)
+
+===== END: Block Server Commands =====
+
+===== FILE: Clientbypasstogglefix =====
+local bypass = gui.Reference("Misc", "bypassclient")
+local saved = false
+local prev = false
+
+callbacks.Register("CreateMove", function(cmd)
+    local lp = entities.GetLocalPlayer()
+    local j = lp ~= nil
+              and lp:GetTeamNumber() == 3
+              and lp:GetPropInt("m_zombieClass") == 5
+
+    if j == prev then return end
+
+    if j then
+        saved = bypass:GetValue()
+        bypass:SetValue(false)
+    else
+        bypass:SetValue(saved)
+    end
+
+    prev = j
+end)
+
+===== END: Clientbypasstogglefix =====
+
+===== FILE: False Prediction FFI fix =====
+
+pcall(function()
+    ffi.cdef[[
+        void* GetModuleHandleA(const char* lpModuleName);
+        int VirtualProtect(void* lpAddress, size_t dwSize, uint32_t flNewProtect, uint32_t* lpflOldProtect);
+    ]]
+end)
+
+local PAGE_EXECUTE_READWRITE = 0x40
+local CREATEMOVE_INDEX       = 27
+local CMD_BUTTONS            = 0x24
+local IN_SPEED               = bit.lshift(1, 17)
+
+local GC = { original = nil, hook_fn = nil, slot_ptr = nil }
+
+local cm_sig    = mem.FindPattern("client.dll", "89 04 B5 ?? ?? ?? ?? E8")
+local global_addr = ffi.cast("uintptr_t*", ffi.cast("uintptr_t", cm_sig) + 3)[0]
+local pClientMode = ffi.cast("uintptr_t*", global_addr)[0]
+local vtable_addr = ffi.cast("uintptr_t*", pClientMode)[0]
+local slot_ptr    = ffi.cast("uintptr_t*", vtable_addr + CREATEMOVE_INDEX * 4)
+
+GC.slot_ptr = slot_ptr
+GC.original = slot_ptr[0]
+
+local cm_t = ffi.typeof("bool(__fastcall*)(void*, void*, float, void*)")
+
+local function Hooked_CreateMove(ecx, edx, flInputSampleTime, cmd)
+    local result = ffi.cast(cm_t, GC.original)(ecx, edx, flInputSampleTime, cmd)
+    if cmd ~= nil then
+        local btn = ffi.cast("int32_t*", ffi.cast("uintptr_t", cmd) + CMD_BUTTONS)
+        if input.IsButtonDown(16) then
+            btn[0] = bit.bor(btn[0], IN_SPEED)
+        else
+            btn[0] = bit.band(btn[0], bit.bxor(btn[0], IN_SPEED))
+        end
+    end
+    return result
+end
+
+GC.hook_fn = ffi.cast(cm_t, Hooked_CreateMove)
+
+local old = ffi.new("uint32_t[1]")
+ffi.C.VirtualProtect(ffi.cast("void*", slot_ptr), 8, PAGE_EXECUTE_READWRITE, old)
+slot_ptr[0] = ffi.cast("uintptr_t", GC.hook_fn)
+ffi.C.VirtualProtect(ffi.cast("void*", slot_ptr), 8, old[0], old)
+
+callbacks.Register("Unload", function()
+    if GC.original and GC.slot_ptr then
+        pcall(function()
+            local o = ffi.new("uint32_t[1]")
+            ffi.C.VirtualProtect(ffi.cast("void*", GC.slot_ptr), 8, PAGE_EXECUTE_READWRITE, o)
+            GC.slot_ptr[0] = ffi.cast("uintptr_t", GC.original)
+            ffi.C.VirtualProtect(ffi.cast("void*", GC.slot_ptr), 8, o[0], o)
+        end)
+    end
+end)
+
+===== END: False Prediction FFI fix =====
+
+===== FILE: Insecure Bypass =====
+pcall(function()
+    ffi.cdef[[
+        bool VirtualProtect(void* lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t* lpflOldProtect);
+    ]]
+end)
+local function write_bytes(addr, bytes)
+    local ptr = ffi.cast("uint8_t*", addr)
+    local old = ffi.new("uint32_t[1]")
+    ffi.C.VirtualProtect(ffi.cast("void*", addr), #bytes, 0x40, old)
+    for i, b in ipairs(bytes) do
+        ptr[i-1] = b
+    end
+    ffi.C.VirtualProtect(ffi.cast("void*", addr), #bytes, old[0], old)
+end
+local p = mem.FindPattern("engine.dll",
+    "A1 ?? ?? ?? ?? 83 78 30 00 74 06 B8 01 00 00 00 C3")
+if p then
+    local addr = ffi.cast("uintptr_t", p)
+    
+    -- Patch: mov eax, 3; ret
+    -- B8 03 00 00 00 = mov eax, 3
+
+===== END: Insecure Bypass =====
+
+===== FILE: LILAC Bhop Bypass =====
+
+
+===== END: LILAC Bhop Bypass =====
+
+===== FILE: MOTD Blocker =====
+pcall(ffi.cdef, [[
+    void* GetModuleHandleA(const char* name);
+    int   VirtualProtect(void* addr, unsigned long size, unsigned long newProt, unsigned long* oldProt);
+]])
+local C = ffi.C
+
+if _G.__MOTD_UNHOOK then pcall(_G.__MOTD_UNHOOK) end
+
+local BLOCK_MODE = "all"       
+local DEBUG_LOG  = true
+
+local VT_RVA   = 0x5E4EDC      
+local SLOT     = 10
+local FN_RVA   = 0x1EA580      
+local MSG_OFF  = 279           
+
+local client_mod = C.GetModuleHandleA("client.dll")
+if client_mod == nil then print("[BlockMOTD] client.dll bulunamadi") return end
+local base = tonumber(ffi.cast("uintptr_t", client_mod))
+
+local slot     = ffi.cast("uintptr_t*", base + VT_RVA + SLOT * 4)
+local expected = base + FN_RVA
+
+if tonumber(slot[0]) ~= expected then
+    print("[BlockMOTD] vtable slotu beklenen degil (baska hook ya da farkli surum), iptal")
+    return
+end
+
+local ShowT = ffi.typeof("void(__fastcall*)(void*, void*, uint8_t)")
+local orig  = ffi.cast(ShowT, expected)
+
+local blocked = 0
+
+local function write_slot(val)
+    local old = ffi.new("unsigned long[1]")
+    C.VirtualProtect(slot, 4, 0x04, old)                 -- PAGE_READWRITE
+    slot[0] = val
+    C.VirtualProtect(slot, 4, old[0], old)
+end
+
+local hook = ffi.cast(ShowT, function(this, edx, state)
+    if state ~= 0 then
+        local block = true
+        if BLOCK_MODE == "hostfile" then
+            local ok, s = pcall(ffi.string, ffi.cast("char*", this) + MSG_OFF, 8)
+            block = ok and s:lower() == "hostfile"
+        end
+        if block then
+            blocked = blocked + 1
+            return
+        end
+    end
+    orig(this, edx, state)
+end)
+
+write_slot(ffi.cast("uintptr_t", hook))
+
+local last_reported = 0
+callbacks.Register("CreateMove", "block_motd_report", function(cmd)
+    if DEBUG_LOG and blocked ~= last_reported then
+        last_reported = blocked
+        print("[BlockMOTD] engellendi (toplam: " .. blocked .. ")")
+    end
+end)
+
+local function unhook()
+    write_slot(expected)
+    hook:free()
+    _G.__MOTD_UNHOOK = nil
+end
+_G.__MOTD_UNHOOK = unhook
+
+callbacks.Register("Unload", "block_motd_unload", function()
+    unhook()
+    print("[BlockMOTD] kaldirildi")
+end)
+
+print("[BlockMOTD] aktif (mod: " .. BLOCK_MODE .. ")")
+
+===== END: MOTD Blocker =====
